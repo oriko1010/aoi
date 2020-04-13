@@ -1,0 +1,6 @@
+fun puts(str *u8) i32 extern
+
+fun main() i32 -> {
+    puts("Hello, world!")
+    0
+}

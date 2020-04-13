@@ -1,0 +1,10 @@
+[package]
+name = "aoi"
+version = "0.1.0"
+authors = []
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0"
+clap = { git = "https://github.com/clap-rs/clap/" }
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm9-0" }
