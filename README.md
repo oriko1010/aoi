@@ -45,6 +45,19 @@ fun print(char i32) -> {
 }
 ```
 
+### Function calls
+
+A function is called by it's identifier being followed with a `(`, a list of expressions separated by a `,` and a `)`. A special case is an identifier being followed by a `.` and then another identifier, which desugars as the first argument expression.
+
+```
+fun add(a i32, b i32) i32 -> a + b
+
+fun main() i32 -> {
+    let x = add(4, 5)
+    x.add(6) // Parsed as add(x, 6)
+}
+```
+
 ### Bool literals
 
 A `bool literal` expression is either `true` or `false`. Always evaluates to `bool` type.
