@@ -1,14 +1,7 @@
-#![feature(box_syntax, or_patterns)]
 #![allow(dead_code)]
 
-mod ast;
-mod codegen;
-mod lexer;
-mod parser;
-mod token;
-
-use crate::{codegen::Codegen, parser::Parser};
 use anyhow::Result;
+use aoi::{codegen::Codegen, parser::Parser};
 use clap::Clap;
 use std::{
     env, fs,
@@ -42,7 +35,7 @@ fn run_file(path: impl AsRef<Path>, optimize: bool) -> Result<()> {
         Ok(program) => {
             println!("{:?}", program);
             let context = inkwell::context::Context::create();
-            let codegen = Codegen::new(&context, optimize);
+            let codegen = Codegen::new(&context, optimize, true);
             let success = codegen.compile(program);
             println!("Codegen done with: {:?}", success);
             Ok(())
@@ -70,7 +63,7 @@ fn repl() -> Result<()> {
             Ok(program) => {
                 println!("{:?}", program);
                 let context = inkwell::context::Context::create();
-                let codegen = Codegen::new(&context, false);
+                let codegen = Codegen::new(&context, false, true);
                 let success = codegen.compile(program);
                 println!("Codegen done with: {:?}", success);
             }

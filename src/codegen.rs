@@ -17,6 +17,7 @@ use std::{cell::RefCell, collections::HashMap};
 
 pub struct Codegen<'a> {
     optimize: bool,
+    print: bool,
     context: &'a Context,
     builder: Builder<'a>,
     module: Module<'a>,
@@ -28,7 +29,7 @@ pub struct Codegen<'a> {
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(context: &'a Context, optimize: bool) -> Self {
+    pub fn new(context: &'a Context, optimize: bool, print: bool) -> Self {
         let builder = context.create_builder();
         let module = context.create_module("Aoi");
         let fpm = PassManager::create(&module);
@@ -52,6 +53,7 @@ impl<'a> Codegen<'a> {
 
         Self {
             optimize,
+            print,
             context,
             builder,
             module,
@@ -63,18 +65,22 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    pub fn compile(&self, program: ast::Program) -> Result<()> {
+    pub fn compile(&self, program: ast::Program) -> Result<i32> {
         self.define_stdlib()?;
 
         for expression in program.expressions {
             self.compile_expresion(expression, None)?;
         }
 
-        self.module.print_to_stderr();
-        let compiled = self.jit("main")?;
-        println!("main exited with {}", unsafe { compiled.call() });
+        if self.print {
+            self.module.print_to_stderr();
+        }
 
-        Ok(())
+        let compiled = self.jit("main")?;
+        let result = unsafe { compiled.call() };
+
+        println!("main exited with {}", result);
+        Ok(result)
     }
 
     fn jit(&self, name: &str) -> Result<JitFunction<unsafe extern "C" fn() -> i32>> {
@@ -449,9 +455,9 @@ impl<'a> Codegen<'a> {
 
     fn compile_string(&self, string: ast::String) -> Result<Value> {
         let value = self.context.const_string(string.value.as_bytes(), true);
-        let global =
-            self.module
-                .add_global(value.get_type(), Some(AddressSpace::Const), "str");
+        let global = self
+            .module
+            .add_global(value.get_type(), Some(AddressSpace::Const), "str");
         global.set_initializer(&value.as_basic_value_enum());
         let alloca = self.create_alloca(
             self.current_function()?,
