@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Expression {
     Program(Program),
     Function(Function),
@@ -10,105 +10,105 @@ pub enum Expression {
     Identifier(Identifier),
     Assign(Assign),
     Return(Return),
+    UnaryOp(UnaryOp),
     BinaryOp(BinaryOp),
-    Discard(Discard),
     Call(Call),
     If(If),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Program {
     pub expressions: Vec<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Function {
     pub signature: FunctionSignature,
     pub body: FunctionBody,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FunctionSignature {
     pub identifier: Identifier,
     pub arguments: Vec<(Identifier, Type)>,
     pub return_type: Type,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FunctionBody {
     Extern,
     Body(Box<Expression>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Block {
     pub expressions: Vec<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Integer {
     pub value: u64,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bool {
     pub value: bool,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct String {
     pub value: Box<str>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Identifier {
     pub name: Box<str>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Type {
     pub identifier: Identifier,
     pub generics: Option<Vec<Type>>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct If {
     pub condition: Box<Expression>,
     pub then: Box<Expression>,
     pub other: Option<Box<Expression>>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Assign {
     pub identifier: Identifier,
     pub expression: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Return {
     pub expression: Box<Expression>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnaryOp {
+    pub op: Box<str>,
+    pub expression: Box<Expression>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BinaryOp {
     pub lhs: Box<Expression>,
     pub op: Box<str>,
     pub rhs: Box<Expression>,
 }
-
-#[derive(Debug)]
-pub struct Discard {
-    pub expression: Box<Expression>,
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Call {
     pub identifier: Identifier,
     pub arguments: Vec<Expression>,
 }
 
 impl Identifier {
-    fn new(name: &str) -> Self {
+    pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string().into_boxed_str(),
         }
@@ -121,9 +121,15 @@ impl From<&str> for Identifier {
     }
 }
 
+impl Integer {
+    pub fn new(value: u64) -> Self {
+        Self { value }
+    }
+}
+
 impl From<u64> for Integer {
     fn from(value: u64) -> Self {
-        Self { value }
+        Self::new(value)
     }
 }
 
@@ -137,6 +143,15 @@ impl String {
     pub fn new(value: &str) -> Self {
         Self {
             value: value.to_string().into_boxed_str(),
+        }
+    }
+}
+
+impl UnaryOp {
+    pub fn new(op: &str, expression: Expression) -> Self {
+        Self {
+            op: op.into(),
+            expression: box expression,
         }
     }
 }
@@ -249,7 +264,7 @@ impl_trivial_from!(for Expression {
     assign: Assign,
     r#return: Return,
     binary_op: BinaryOp,
-    discard: Discard,
+    unary_op: UnaryOp,
     call: Call,
     r#if: If,
 });

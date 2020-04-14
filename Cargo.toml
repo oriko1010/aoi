@@ -8,3 +8,4 @@ edition = "2018"
 anyhow = "1.0"
 clap = { git = "https://github.com/clap-rs/clap/" }
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm9-0" }
+rustyline = "6.1"

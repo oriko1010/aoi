@@ -40,7 +40,7 @@ fn variables() {
         "fun a(x i32) i32 -> let y = x
         fun main() i32 -> {
             let z = a(100)
-            z.a()   
+            z.a()
         }",
         100,
     );
@@ -50,6 +50,21 @@ fn variables() {
 fn if_expr() {
     simple_test("fun main() i32 -> if true 4 else 8", 4);
     simple_test("fun main() i32 -> if false 4 else 8", 8);
+}
+
+#[test]
+fn everything() {
+    simple_test(
+        "fun puts(str *u8) i32 extern
+        fun precedence(x i32, y i32, z i32) i32 -> x + y * z
+        fun not(value bool) bool -> if value false else true
+        fun main() i32 -> {
+            puts(\"everything works!\")
+            let val = if false.not() precedence(1, 2, 4) else { 0 } // 1 + (2 * 4)
+            val = val + val // 9 + 9
+        }",
+        18,
+    );
 }
 
 fn simple_test(code: &str, expect: i32) {

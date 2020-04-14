@@ -12,9 +12,27 @@ pub enum TokenType {
     Eof,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Token<'a> {
     pub ttype: TokenType,
     pub trivia: &'a str,
     pub lexeme: &'a str,
+}
+
+impl<'a> Token<'a> {
+    pub fn new(ttype: TokenType, trivia: &'a str, lexeme: &'a str) -> Self {
+        Self {
+            ttype,
+            trivia,
+            lexeme,
+        }
+    }
+}
+
+impl Token<'static> {
+    pub const EOF: Self = Self {
+        ttype: TokenType::Eof,
+        trivia: "",
+        lexeme: "",
+    };
 }

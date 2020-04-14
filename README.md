@@ -1,4 +1,4 @@
-## Data-types
+## Data types
 
 Aoi has several built-in data types
 
@@ -33,7 +33,7 @@ fun immediate(x f64) f64 -> let div = x / 1
 ### Functions
 
 A `function signature` starts with a `fun` keyword, has a name, an argument list, and an optional return type. If no return type is specifier, `unit` is implied.  
-After the signature can come either a `function literal` or an `extern` keyword. A `function literal` starts with a `->` token and any expression after. The expression will target typed to the function's return type.  
+After the signature can come either a `function literal` or an `extern` keyword. A `function literal` starts with a `->` token and any expression after. The expression will be target typed to the function's return type.  
 
 ```
 fun putchar(char i32) i32 extern
@@ -47,14 +47,14 @@ fun print(char i32) -> {
 
 ### Function calls
 
-A function is called by it's identifier being followed with a `(`, a list of expressions separated by a `,` and a `)`. A special case is an identifier being followed by a `.` and then another identifier, which desugars as the first argument expression.
+A function is called by it's identifier being followed with a `(`, a list of expressions separated by a `,` and a `)`. Special cased is an expression being followed by a `.` and then the function identifier, which desugars the expression as the first argument.
 
 ```
 fun add(a i32, b i32) i32 -> a + b
 
 fun main() i32 -> {
-    let x = add(4, 5)
-    x.add(6) // Parsed as add(x, 6)
+    let x = 4.add(5)  // Parsed as add(4, 5)
+    let x = add(x, 6) // Works too
 }
 ```
 
@@ -104,5 +104,19 @@ fun short(cond bool) i128 -> if cond 2 else 4 + 8
 
 fun explicit(cond bool) i128 -> {
     if cond { 2 } else { 4 + 8 }
+}
+```
+
+### Block expressions
+
+A block expression starts with a `{` and contains a list of expressions ending with `}`. The expression evaluates to the last value in the list. Any variables are scoped within the block and cannot be accessed outside of it.
+```
+fun block(x f64, y f64) f64 -> { // this is a block too
+    let value = {
+        let a = x + y
+        let b = x * y
+        b - a
+    }
+    value
 }
 ```

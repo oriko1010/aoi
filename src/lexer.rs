@@ -1,4 +1,4 @@
-use crate::token::{Token, TokenType};
+use crate::token::{Token, TokenType::*};
 use std::{iter::Peekable, str::CharIndices};
 
 pub struct Lexer<'a> {
@@ -16,44 +16,55 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next(&mut self) -> Option<Token<'a>> {
+    pub fn next(&mut self) -> Token<'a> {
+        let mut in_comment = false;
         let current = loop {
             match self.chars.peek() {
+                Some((_, '\n')) if in_comment => {
+                    self.chars.next();
+                    in_comment = false;
+                }
                 Some((_, ' ' | '\n')) => {
                     self.chars.next();
                 }
-                Some(&(current, _)) => break Some(current),
-                None => break None,
+                Some(&(current, '/')) if !in_comment => {
+                    let mut clone = self.chars.clone();
+                    clone.next();
+                    match clone.peek() {
+                        Some((_, '/')) => {
+                            in_comment = true;
+                            continue;
+                        }
+                        _ => break current,
+                    }
+                }
+                Some(_) if in_comment => {
+                    self.chars.next();
+                }
+                Some(&(current, _)) => break current,
+                None => return Token::EOF,
             }
-        }?;
+        };
 
         let trivia = &self.code[self.position..current];
         self.position = current;
 
         let (current, ttype) = {
-            let (current, ch) = self.chars.next()?;
+            let (current, ch) = match self.chars.next() {
+                Some((current, ch)) => (current, ch),
+                None => return Token::EOF,
+            };
+
             match ch {
-                '{' => {
-                    let next = self.chars.peek()?.0;
-                    Some((next, TokenType::LeftBrace))
-                }
-                '}' => {
-                    let next = self.chars.peek()?.0;
-                    Some((next, TokenType::RightBrace))
-                }
-                '(' => {
-                    let next = self.chars.peek()?.0;
-                    Some((next, TokenType::LeftParen))
-                }
-                ')' => {
-                    let next = self.chars.peek()?.0;
-                    Some((next, TokenType::RightParen))
-                }
+                '{' => (current + 1, LeftBrace),
+                '}' => (current + 1, RightBrace),
+                '(' => (current + 1, LeftParen),
+                ')' => (current + 1, RightParen),
                 '"' => loop {
                     match self.chars.next() {
-                        Some((current, '"')) => break Some((current + 1, TokenType::String)),
+                        Some((current, '"')) => break (current + 1, String),
                         Some(_) => continue,
-                        None => break None,
+                        None => break (self.code.len(), Error),
                     }
                 },
                 'a'..='z' | 'A'..='Z' | '_' => loop {
@@ -61,49 +72,44 @@ impl<'a> Lexer<'a> {
                         Some((_, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')) => {
                             self.chars.next();
                         }
-                        Some(&(current, _)) => break Some((current, TokenType::Symbol)),
-                        None => break Some((self.code.len(), TokenType::Symbol)),
+                        Some(&(current, _)) => break (current, Symbol),
+                        None => break (self.code.len(), Symbol),
                     }
                 },
-                '=' | '+' | '-' | '*' | '/' | '%' | ';' | ',' | '.' | '<' | '>' | '[' | ']' => {
-                    loop {
-                        match self.chars.peek() {
-                            Some((
-                                _,
-                                '=' | '+' | '-' | '*' | '/' | '%' | ';' | ',' | '.' | '<' | '>'
-                                | '[' | ']',
-                            )) => {
-                                self.chars.next();
-                            }
-                            Some(&(current, _)) => break Some((current, TokenType::Operator)),
-                            None => break Some((self.code.len(), TokenType::Operator)),
+                '=' | '+' | '-' | '*' | '/' | '%' | ';' | ',' | '.' | '<' | '>' | '[' | ']'
+                | '!' => loop {
+                    match self.chars.peek() {
+                        Some((
+                            _,
+                            '=' | '+' | '-' | '*' | '/' | '%' | ';' | ',' | '.' | '<' | '>' | '['
+                            | ']' | '!',
+                        )) => {
+                            self.chars.next();
                         }
+                        Some(&(current, _)) => break (current, Operator),
+                        None => break (self.code.len(), Operator),
                     }
-                }
+                },
                 '0'..='9' => loop {
                     match self.chars.peek() {
                         Some((_, '0'..='9')) => {
                             self.chars.next();
                         }
-                        Some(&(current, _)) => break Some((current, TokenType::Number)),
-                        None => break Some((self.code.len(), TokenType::Number)),
+                        Some(&(current, _)) => break (current, Number),
+                        None => break (self.code.len(), Number),
                     }
                 },
                 _ => {
                     self.chars.next();
-                    Some((current, TokenType::Error))
+                    (current, Error)
                 }
             }
-        }?;
+        };
 
         let lexeme = &self.code[self.position..current];
         self.position = current;
 
-        Some(Token {
-            ttype,
-            trivia,
-            lexeme,
-        })
+        Token::new(ttype, trivia, lexeme)
     }
 }
 
@@ -111,6 +117,10 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Token<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next()
+        match self.next() {
+            Token { ttype: Error, .. } => None,
+            Token { ttype: Eof, .. } => None,
+            token => Some(token),
+        }
     }
 }
