@@ -13,6 +13,8 @@ use std::{
 #[derive(Clap)]
 #[clap(version = "0.1")]
 struct Opts {
+    #[clap(short = "a", long = "ast", help = "Show parsed AST")]
+    ast: bool,
     #[clap(short = "b", long = "backtrace", help = "Show backtrace on Err")]
     backtrace: bool,
     #[clap(short = "o", long = "optimize", help = "Optimize LLVM IR")]
@@ -31,18 +33,25 @@ fn main() -> Result<()> {
     if opts.parse {
         parse_repl()?;
     } else {
-        run_file("./example/main.aoi", opts.optimize, !opts.no_verify)?;
+        run_file(
+            "./example/main.aoi",
+            opts.optimize,
+            !opts.no_verify,
+            opts.ast,
+        )?;
     }
     Ok(())
 }
 
-fn run_file(path: impl AsRef<Path>, optimize: bool, verify: bool) -> Result<()> {
+fn run_file(path: impl AsRef<Path>, optimize: bool, verify: bool, ast: bool) -> Result<()> {
     let code = fs::read_to_string(path.as_ref())?;
     let mut parser = Parser::new(code.as_str());
     let program = parser.parse_program();
     match program {
         Ok(program) => {
-            //println!("{:?}", program);
+            if ast {
+                println!("{:#?}", program);
+            }
             let context = inkwell::context::Context::create();
             let codegen = Codegen::new(&context, optimize, true, verify);
             let success = codegen.compile(program);

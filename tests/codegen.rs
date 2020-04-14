@@ -36,6 +36,38 @@ fn call_extern() {
 }
 
 #[test]
+fn call_overloads() {
+    simple_test(
+        "fun puts(str *u8) i32 extern
+        fun overload(str *u8) *u8 -> str
+        fun overload(x i32) i32 -> x
+        fun overload(x f64) f64 -> x
+
+        fun main() -> {
+            puts(overload(\"str\"))
+            let a = overload(2.3)
+            let b = overload(100)
+            b
+        }
+        ",
+        100,
+    );
+    simple_test(
+        "fun puts(str *u8) i32 extern
+        fun complex(a bool, x f64, z *u8) -> if a x.print() else puts(z)
+        fun complex(a bool, x i32, z *u8) i32 -> if a { x.print() x + 1 } else { puts(z) 0 }
+
+        fun main() i32 -> {
+            let str = \"shouldn't be printed\"
+            complex(true, 13.0, str)
+            complex(true, 4, str) // if true 4 + 1
+        }
+        ",
+        5,
+    );
+}
+
+#[test]
 fn variables() {
     simple_test(
         "fun a(x i32) i32 -> let y = x
@@ -51,6 +83,14 @@ fn variables() {
 fn if_expr() {
     simple_test("fun main() i32 -> if true 4 else 8", 4);
     simple_test("fun main() i32 -> if false 4 else 8", 8);
+    simple_test(
+        "fun unit(x i32, y f64) -> if false x.print() else print(y) 
+        fun main() i32 -> {
+            unit(1, 1)
+            2
+        }",
+        2,
+    );
 }
 
 #[test]
@@ -72,6 +112,7 @@ fn floats() {
 fn everything() {
     simple_test(
         "fun puts(str *u8) i32 extern
+        fun precedence(x i32, y i32, z i64) i32 -> 0
         fun precedence(x i32, y i32, z i32) i32 -> x + y * z
         fun not(value bool) bool -> if value false else true
         fun main() i32 -> {

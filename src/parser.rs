@@ -233,7 +233,7 @@ impl<'a> Parser<'a> {
             self.expect_operator("->")?;
             let body = self.parse_expression(0)?;
             Ok(Function::new(
-                FunctionSignature::new(identifier, arguments, return_type),
+                FunctionSignature::new(identifier, arguments, return_type, false),
                 body,
             ))
         } else {
@@ -242,6 +242,7 @@ impl<'a> Parser<'a> {
                 identifier,
                 arguments,
                 return_type,
+                true,
             )))
         }
     }

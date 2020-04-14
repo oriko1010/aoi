@@ -1,5 +1,6 @@
 fun puts(str *u8) i32 extern
 
+fun precedence(x i32, y i32, z i64) i32 -> 0
 fun precedence(x i32, y i32, z i32) i32 -> x + y * z
 
 fun not(value bool) bool -> if value false else true

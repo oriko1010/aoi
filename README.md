@@ -1,4 +1,4 @@
-## Data types
+### Data types
 
 Aoi has several built-in data types
 
@@ -14,8 +14,6 @@ f64 | 64-bit floating point
 f128 | 128-bit floating point
 *T | pointer to T
 []T | slice of T with a u64 length
-
-## Reference
 
 ### Variables
 
@@ -58,7 +56,20 @@ fun main() i32 -> {
 }
 ```
 
-### Bool literals
+Functions may be overloaded by their argument types.
+
+```
+fun add(a i32, b i32) i32 -> a + b
+fun add(a f64, b f64) f64 -> a + b
+
+fun main() i32 -> {
+    let x = add(3, 3) // i32(6)
+    let y = add(4.5, 4.5) // f64(9.0)
+    x
+}
+```
+
+### Literals
 
 A `bool literal` expression is either `true` or `false`. Always evaluates to `bool` type.
 
@@ -67,20 +78,22 @@ let t = true  // bool(true)
 let f = false // bool(false)
 ```
 
-### Integer literals
-
 An `integer literal` expression is any whole number. The literal expression is target typed and defaults to `i32` if no target type exists.
 
 ```
-fun double() f64 -> 8 // target typed to f64(8.0)
-
-fun default() i16 -> {
-    let x = 4 // defaulted to i32(4)
-    2 // target typed to i16(2)
-}
+fun long(x i64) i64 -> x
+let l = long(8) // i64(8)
+let i = 8       // i32(8)
 ```
 
-### String literals
+
+A `float literal` expression is a number with a decimal point `.`, followed by a fractional part. Neither part can be omitted, i.e. `1.` or `.1` do not work. The literal expression is target typed and defaults to `f64` if no target type exists.
+
+```
+fun float(x f32) f32 -> x
+let f = float(16.0) // f32(16.0)
+let d = 16.0        // f64(16.0)
+```
 
 A `string literal` expression is any text surrounded by `"` quotes. The type of the expression is `*u8`. Currently null-terminated.
 

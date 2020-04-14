@@ -45,6 +45,7 @@ pub struct FunctionSignature {
     pub identifier: Identifier,
     pub arguments: Vec<(Identifier, Type)>,
     pub return_type: Type,
+    pub is_extern: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +65,12 @@ impl Identifier {
 impl From<&str> for Identifier {
     fn from(name: &str) -> Self {
         Self::new(name)
+    }
+}
+
+impl PartialEq<&str> for Identifier {
+    fn eq(&self, other: &&str) -> bool {
+        &*self.name == *other
     }
 }
 
@@ -154,11 +161,13 @@ impl FunctionSignature {
         identifier: Identifier,
         arguments: Vec<(Identifier, Type)>,
         return_type: Type,
+        is_extern: bool,
     ) -> Self {
         Self {
             identifier,
             arguments,
             return_type,
+            is_extern,
         }
     }
 }

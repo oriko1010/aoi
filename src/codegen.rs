@@ -1,5 +1,5 @@
 use crate::ast;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, ensure, Result};
 use inkwell::{
     builder::Builder,
     context::Context,
@@ -28,6 +28,8 @@ pub struct Codegen<'a> {
     type_check: RefCell<TypeCheck>,
     named_values: RefCell<HashMap<String, Value<'a>>>,
 }
+
+const CALL_CONV: u32 = 8;
 
 impl<'a> Codegen<'a> {
     pub fn new(context: &'a Context, optimize: bool, print: bool, verify: bool) -> Self {
@@ -195,37 +197,77 @@ impl<'a> Codegen<'a> {
             identifier,
             arguments,
         } = call;
-        let function = self
-            .module
-            .get_function(&identifier.name)
-            .ok_or(anyhow!("No function {} found", identifier.name))?;
 
         let aoi = self.aoi.borrow();
-        let signature = aoi
-            .signature_of(&identifier.name)
-            .ok_or(anyhow!("No function signature {} found", identifier.name))?;
-
         let type_check = self.type_check.borrow();
 
-        let mut args = Vec::with_capacity(arguments.len());
-        for (i, argument) in arguments.into_iter().enumerate() {
-            let target_type = &signature.arguments[i].1;
-            let target_type = type_check
-                .resolve(target_type)
-                .ok_or(anyhow!("Could not resolve type {:?}", target_type))?;
-            let arg = self.compile_expresion(argument, Some(target_type))?;
-            args.push(arg.llvm_value.basic()?);
-        }
+        let (args, signature) = match aoi.signature_of(&identifier.name, arguments.len()) {
+            SignatureMatch::None => bail!("No function signature {} found", identifier.name),
+            SignatureMatch::Single(signature) => {
+                let mut args = Vec::with_capacity(arguments.len());
+                for (i, argument) in arguments.into_iter().enumerate() {
+                    let target_type = &signature.arguments[i].1;
+                    let target_type = type_check
+                        .resolve(target_type)
+                        .ok_or(anyhow!("Could not resolve type {:?}", target_type))?;
+                    let arg = self.compile_expresion(argument, Some(target_type))?;
+                    args.push(arg.llvm_value.basic()?);
+                }
+                (args, signature)
+            }
+            SignatureMatch::Multiple(multiple) => {
+                let mut args = Vec::with_capacity(arguments.len());
+                let mut candidates = Vec::new();
+                for signature in multiple.clone() {
+                    let mut arg_types = Vec::new();
+                    for i in 0..arguments.len() {
+                        let arg_type = type_check.resolve(&signature.arguments[i].1).unwrap();
+                        arg_types.push(arg_type);
+                    }
+                    candidates.push((arg_types, signature));
+                }
+
+                for (i, argument) in arguments.into_iter().enumerate() {
+                    match candidates.len() {
+                        0 => bail!("No overload candidates found"),
+                        1 => {
+                            let arg =
+                                self.compile_expresion(argument, Some(candidates[0].0[i].clone()))?;
+                            args.push(arg.llvm_value.basic()?);
+                        }
+                        _ => {
+                            let arg = self.compile_expresion(argument, None)?;
+                            candidates.retain(|(types, _)| types[i] == arg.ty);
+                            args.push(arg.llvm_value.basic()?);
+                        }
+                    };
+                }
+
+                match candidates.len() {
+                    0 => bail!("No overload candidates found"),
+                    1 => (args, candidates[0].1),
+                    _ => bail!("Multiple overloads found: {:?}", candidates),
+                }
+            }
+        };
 
         let return_type = type_check.resolve(&signature.return_type).ok_or(anyhow!(
             "Could not resolve return type {:?}",
             signature.return_type
         ))?;
-        drop(aoi);
 
-        let return_value = self.builder.build_call(function, &args, "call");
-        if let Some(return_value) = return_value.try_as_basic_value().left() {
-            Ok(return_type.value(return_value.into()))
+        let function = aoi.value_of(&signature)?;
+
+        let call = self.builder.build_call(function, &args, "call");
+        if signature.identifier != "main" && !signature.is_extern {
+            call.set_call_convention(CALL_CONV);
+        }
+
+        if let Some(call) = call.try_as_basic_value().left() {
+            // TODO: Undefined behavior, fix this
+            let value =
+                unsafe { std::mem::transmute::<_, Value<'a>>(return_type.value(call.into())) };
+            Ok(value)
         } else {
             Ok(Type::Unit.value(self.context.i32_type().const_zero().into()))
         }
@@ -322,6 +364,10 @@ impl<'a> Codegen<'a> {
         self.builder.position_at_end(merge_block);
 
         let phi_type = match target_type {
+            Some(Type::Unit) => {
+                // TODO: Add a safe way to construct unit/void
+                return Ok(Type::Unit.value(unsafe { std::mem::zeroed() }));
+            }
             Some(ty) => ty.map_to_llvm_basic(self.context)?,
             None => self.context.i32_type().as_basic_type_enum(),
         };
@@ -416,8 +462,13 @@ impl<'a> Codegen<'a> {
             match (lhs.llvm_value.basic()?, rhs.llvm_value.basic()?) {
                 (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => {
                     return match ty {
-                        Type::Int(_) => Ok(ty.value(self.builder.build_int_signed_div(lhs, rhs, "div").into())),
-                        Type::UInt(_) => Ok(ty.value(self.builder.build_int_unsigned_div(lhs, rhs, "div").into())),
+                        Type::Int(_) => {
+                            Ok(ty.value(self.builder.build_int_signed_div(lhs, rhs, "div").into()))
+                        }
+                        Type::UInt(_) => {
+                            Ok(ty
+                                .value(self.builder.build_int_unsigned_div(lhs, rhs, "div").into()))
+                        }
                         _ => bail!("Non int type"),
                     }
                 }
@@ -571,25 +622,27 @@ impl<'a> Codegen<'a> {
         digit_fmt_global.set_linkage(Linkage::Private);
         digit_fmt_global.set_unnamed_address(UnnamedAddress::Global);
 
-        let long_digit_fmt = self.context.const_string(b"i64: %lld\n", true);
-        let long_digit_fmt_global =
-            self.module
-                .add_global(long_digit_fmt.get_type(), None, "long_digit_fmt");
-        long_digit_fmt_global.set_initializer(&long_digit_fmt.as_basic_value_enum());
-        long_digit_fmt_global.set_constant(true);
-        long_digit_fmt_global.set_linkage(Linkage::Private);
-        long_digit_fmt_global.set_unnamed_address(UnnamedAddress::Global);
+        let float_fmt = self.context.const_string(b"f64: %lf\n", true);
+        let float_fmt_global = self
+            .module
+            .add_global(float_fmt.get_type(), None, "float_fmt");
+        float_fmt_global.set_initializer(&float_fmt.as_basic_value_enum());
+        float_fmt_global.set_constant(true);
+        float_fmt_global.set_linkage(Linkage::Private);
+        float_fmt_global.set_unnamed_address(UnnamedAddress::Global);
 
         let print_i32_signature = ast::FunctionSignature::new(
-            "printI32".into(),
+            "print".into(),
             vec![("value".into(), ast::Type::new("i32".into(), None))],
             ast::Type::new("unit".into(), None),
+            false,
         );
 
-        let print_i64_signature = ast::FunctionSignature::new(
-            "printI64".into(),
-            vec![("value".into(), ast::Type::new("i64".into(), None))],
+        let print_f64_signature = ast::FunctionSignature::new(
+            "print".into(),
+            vec![("value".into(), ast::Type::new("f64".into(), None))],
             ast::Type::new("unit".into(), None),
+            false,
         );
 
         let print_i32_fun = self.declare_function(print_i32_signature)?;
@@ -605,14 +658,14 @@ impl<'a> Codegen<'a> {
         );
         self.builder.build_return(None);
 
-        let print_i64_fun = self.declare_function(print_i64_signature)?;
-        let print_body = self.context.append_basic_block(print_i64_fun, "body");
+        let print_f64_fun = self.declare_function(print_f64_signature)?;
+        let print_body = self.context.append_basic_block(print_f64_fun, "body");
         self.builder.position_at_end(print_body);
         self.builder.build_call(
             printf_fn,
             &[
-                long_digit_fmt_global.as_basic_value_enum(),
-                print_i64_fun.get_first_param().unwrap(),
+                float_fmt_global.as_basic_value_enum(),
+                print_f64_fun.get_first_param().unwrap(),
             ],
             "call",
         );
@@ -627,6 +680,7 @@ impl<'a> Codegen<'a> {
             "len".into(),
             vec![("slice".into(), slice_type.clone())],
             ast::Type::new("u64".into(), None),
+            false,
         );
 
         let len_fun = self.declare_function(len_signature)?;
@@ -646,6 +700,7 @@ impl<'a> Codegen<'a> {
                 "Pointer".into(),
                 Some(vec![ast::Type::new("u8".into(), None)]),
             ),
+            false,
         );
 
         let data_fun = self.declare_function(data_signature)?;
@@ -667,7 +722,8 @@ impl<'a> Codegen<'a> {
         version_str_global.set_linkage(Linkage::Private);
         version_str_global.set_unnamed_address(UnnamedAddress::Global);
 
-        let version_signature = ast::FunctionSignature::new("version".into(), vec![], slice_type);
+        let version_signature =
+            ast::FunctionSignature::new("version".into(), vec![], slice_type, false);
 
         let version_fun = self.declare_function(version_signature)?;
         let version_body = self.context.append_basic_block(version_fun, "name");
@@ -728,8 +784,12 @@ impl<'a> Codegen<'a> {
             }
         }
 
+        if signature.identifier != "name" && !signature.is_extern {
+            llvm_fun.set_call_conventions(CALL_CONV);
+        }
+
         let mut aoi = self.aoi.borrow_mut();
-        aoi.add_signature(signature);
+        aoi.add_signature(signature, llvm_fun)?;
 
         Ok(llvm_fun)
     }
@@ -737,30 +797,64 @@ impl<'a> Codegen<'a> {
 
 struct AoiContext<'a> {
     signatures: Vec<ast::FunctionSignature>,
-    compiled: Vec<Option<FunctionValue<'a>>>,
+    values: Vec<FunctionValue<'a>>,
 }
 
 impl<'a> AoiContext<'a> {
     fn new() -> Self {
         Self {
             signatures: Vec::new(),
-            compiled: Vec::new(),
+            values: Vec::new(),
         }
     }
 
-    fn add_signature(&mut self, signature: ast::FunctionSignature) {
+    fn add_signature(
+        &mut self,
+        signature: ast::FunctionSignature,
+        value: FunctionValue<'a>,
+    ) -> Result<()> {
+        ensure!(
+            !self.signatures.contains(&signature),
+            "Function definition {:?} already exists.",
+            signature
+        );
         self.signatures.push(signature);
-        self.compiled.push(None);
+        self.values.push(value);
+        Ok(())
     }
 
-    fn signature_of(&self, name: &str) -> Option<&ast::FunctionSignature> {
+    fn signature_of(&self, name: &str, arguments: usize) -> SignatureMatch {
+        use SignatureMatch::*;
+        let mut found = None;
         for signature in self.signatures.iter() {
-            if &*signature.identifier.name == name {
-                return Some(signature);
+            if signature.identifier == name && signature.arguments.len() == arguments {
+                found = match found {
+                    None => Single(signature),
+                    Single(first) => Multiple(vec![first, signature]),
+                    Multiple(mut multiple) => {
+                        multiple.push(signature);
+                        Multiple(multiple)
+                    }
+                }
             }
         }
-        None
+        found
     }
+
+    fn value_of(&self, signature: &ast::FunctionSignature) -> Result<FunctionValue> {
+        let index = self
+            .signatures
+            .iter()
+            .position(|s| s == signature)
+            .ok_or(anyhow!("No function signature {:?} found.", signature))?;
+        Ok(self.values[index])
+    }
+}
+
+enum SignatureMatch<'a> {
+    None,
+    Single(&'a ast::FunctionSignature),
+    Multiple(Vec<&'a ast::FunctionSignature>),
 }
 
 #[derive(Clone, Debug)]
@@ -794,6 +888,9 @@ impl Type {
             (F128, F128) => true,
             (Int(x), Int(y)) => x == y,
             (UInt(x), UInt(y)) => x == y,
+            (Pointer(x), Pointer(y)) => x == y,
+            (Slice(x), Slice(y)) => x == y,
+            (Function(x, a), Function(y, b)) => a == b && x == y,
             _ => false,
         }
     }
@@ -875,6 +972,12 @@ impl Type {
                 self
             )),
         }
+    }
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Type) -> bool {
+        self.is_same(other)
     }
 }
 

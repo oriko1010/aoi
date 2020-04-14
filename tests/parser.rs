@@ -52,7 +52,8 @@ fn function() {
         ast![Function::new_extern(FunctionSignature::new(
             "putchar".into(),
             vec![("char".into(), Type::new("i32".into(), None))],
-            Type::new("i32".into(), None)
+            Type::new("i32".into(), None),
+            true
         ))
         .into()],
     );
@@ -62,7 +63,8 @@ fn function() {
             FunctionSignature::new(
                 "putchar".into(),
                 vec![("char".into(), Type::new("i32".into(), None))],
-                Type::new("i32".into(), None)
+                Type::new("i32".into(), None),
+                false
             ),
             Identifier::new("char").into()
         )
@@ -119,20 +121,22 @@ fn program() {
             Function::new_extern(FunctionSignature::new(
                 "puts".into(),
                 vec![("str".into(), pointer_u8.clone())],
-                Type::new("i32".into(), None)
+                Type::new("i32".into(), None),
+                true,
             ))
             .into(),
             Function::new(
                 FunctionSignature::new(
                     "get".into(),
                     vec![("cond".into(), Type::new("bool".into(), None))],
-                    pointer_u8
+                    pointer_u8,
+                    false
                 ),
                 String::new("str").into()
             )
             .into(),
             Function::new(
-                FunctionSignature::new("main".into(), vec![], Type::new("i32".into(), None)),
+                FunctionSignature::new("main".into(), vec![], Type::new("i32".into(), None), false),
                 Block::new(vec![
                     Assign::new("str".into(), Call::new("get".into(), vec![]).into()).into(),
                     Call::new("puts".into(), vec![Identifier::new("str").into()]).into(),
