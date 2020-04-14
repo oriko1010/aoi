@@ -19,6 +19,8 @@ struct Opts {
     optimize: bool,
     #[clap(short = "p", long = "parse", help = "Run the parser REPL")]
     parse: bool,
+    #[clap(short = "n", long = "no-verify", help = "Don't verify the LLVM IR")]
+    no_verify: bool,
 }
 
 fn main() -> Result<()> {
@@ -29,20 +31,20 @@ fn main() -> Result<()> {
     if opts.parse {
         parse_repl()?;
     } else {
-        run_file("./example/main.aoi", opts.optimize)?;
+        run_file("./example/main.aoi", opts.optimize, !opts.no_verify)?;
     }
     Ok(())
 }
 
-fn run_file(path: impl AsRef<Path>, optimize: bool) -> Result<()> {
+fn run_file(path: impl AsRef<Path>, optimize: bool, verify: bool) -> Result<()> {
     let code = fs::read_to_string(path.as_ref())?;
     let mut parser = Parser::new(code.as_str());
     let program = parser.parse_program();
     match program {
         Ok(program) => {
-            println!("{:?}", program);
+            //println!("{:?}", program);
             let context = inkwell::context::Context::create();
-            let codegen = Codegen::new(&context, optimize, true);
+            let codegen = Codegen::new(&context, optimize, true, verify);
             let success = codegen.compile(program);
             println!("Codegen done with: {:?}", success);
             Ok(())
@@ -85,7 +87,7 @@ fn repl() -> Result<()> {
             Ok(program) => {
                 println!("{:?}", program);
                 let context = inkwell::context::Context::create();
-                let codegen = Codegen::new(&context, false, true);
+                let codegen = Codegen::new(&context, false, true, true);
                 let success = codegen.compile(program);
                 println!("Codegen done with: {:?}", success);
             }

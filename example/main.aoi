@@ -1,6 +1,11 @@
 fun puts(str *u8) i32 extern
 
+fun precedence(x i32, y i32, z i32) i32 -> x + y * z
+
+fun not(value bool) bool -> if value false else true
+
 fun main() i32 -> {
-    puts("Hello, world!")
-    0
+    puts("everything works!")
+    let val = if false.not() precedence(1, 2, 4) else { 0 } // 1 + (2 * 4)
+    val = val + val // 9 + 9
 }

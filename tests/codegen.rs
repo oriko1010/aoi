@@ -17,8 +17,9 @@ fn call_func() {
     );
     simple_test(
         "fun x(a i16, b i32, c i64) i32 -> b
+        fun cast(a i16) i16 -> a
         fun main() i32 -> {
-            let a = 1
+            let a = cast(1)
             a.x(2, 3)
         }",
         2,
@@ -74,7 +75,7 @@ fn simple_test(code: &str, expect: i32) {
     let mut parser = Parser::new(&code);
     let program = parser.parse_program().expect("Error parsing program");
     let context = Context::create();
-    let codegen = Codegen::new(&context, false, false);
+    let codegen = Codegen::new(&context, true, false, true);
     let result = codegen.compile(program).expect("Error compiling program");
     assert_eq!(result, expect)
 }

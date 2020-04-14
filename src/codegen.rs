@@ -9,7 +9,7 @@ use inkwell::{
     types::{BasicType, BasicTypeEnum, FloatType, FunctionType, IntType},
     values::{
         AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
-        PointerValue,
+        PointerValue, UnnamedAddress,
     },
     AddressSpace, OptimizationLevel,
 };
@@ -18,6 +18,7 @@ use std::{cell::RefCell, collections::HashMap};
 pub struct Codegen<'a> {
     optimize: bool,
     print: bool,
+    verify: bool,
     context: &'a Context,
     builder: Builder<'a>,
     module: Module<'a>,
@@ -29,7 +30,7 @@ pub struct Codegen<'a> {
 }
 
 impl<'a> Codegen<'a> {
-    pub fn new(context: &'a Context, optimize: bool, print: bool) -> Self {
+    pub fn new(context: &'a Context, optimize: bool, print: bool, verify: bool) -> Self {
         let builder = context.create_builder();
         let module = context.create_module("Aoi");
         let fpm = PassManager::create(&module);
@@ -42,7 +43,9 @@ impl<'a> Codegen<'a> {
             fpm.add_instruction_combining_pass();
             fpm.add_reassociate_pass();
         }
-        fpm.add_verifier_pass();
+        if verify {
+            fpm.add_verifier_pass();
+        }
         fpm.initialize();
         let execution_engine = module
             .create_jit_execution_engine(OptimizationLevel::None)
@@ -54,6 +57,7 @@ impl<'a> Codegen<'a> {
         Self {
             optimize,
             print,
+            verify,
             context,
             builder,
             module,
@@ -175,8 +179,10 @@ impl<'a> Codegen<'a> {
             },
         };
 
-        //function.verify(true);
-        //self.fpm.run_on(&function);
+        if self.verify {
+            function.verify(true);
+        }
+        self.fpm.run_on(&function);
 
         Ok(value)
     }
@@ -455,19 +461,23 @@ impl<'a> Codegen<'a> {
 
     fn compile_string(&self, string: ast::String) -> Result<Value> {
         let value = self.context.const_string(string.value.as_bytes(), true);
-        let global = self
-            .module
-            .add_global(value.get_type(), Some(AddressSpace::Const), "str");
+        let global = self.module.add_global(value.get_type(), None, "str");
         global.set_initializer(&value.as_basic_value_enum());
-        let alloca = self.create_alloca(
-            self.current_function()?,
-            "temp",
-            &Type::Pointer(box Type::UInt(8)),
-        )?;
-        self.builder.build_store(alloca, global);
-        let load = self.builder.build_load(alloca, "load");
+        global.set_constant(true);
+        global.set_linkage(Linkage::Private);
+        global.set_unnamed_address(UnnamedAddress::Global);
 
-        Ok(Value::new(Type::Pointer(box Type::UInt(8)), load.into()))
+        let get = unsafe {
+            self.builder.build_gep(
+                global.as_pointer_value(),
+                &[
+                    self.context.i64_type().const_zero(),
+                    self.context.i64_type().const_zero(),
+                ],
+                "get",
+            )
+        };
+        Ok(Value::new(Type::Pointer(box Type::UInt(8)), get.into()))
     }
 
     fn current_function(&self) -> Result<FunctionValue> {
@@ -520,20 +530,22 @@ impl<'a> Codegen<'a> {
         let printf_fn = self.module.add_function("printf", printf_ty, None);
 
         let digit_fmt = self.context.const_string(b"i32: %d\n", true);
-        let digit_fmt_global = self.module.add_global(
-            digit_fmt.get_type(),
-            Some(AddressSpace::Global),
-            "digit_fmt",
-        );
+        let digit_fmt_global = self
+            .module
+            .add_global(digit_fmt.get_type(), None, "digit_fmt");
         digit_fmt_global.set_initializer(&digit_fmt.as_basic_value_enum());
+        digit_fmt_global.set_constant(true);
+        digit_fmt_global.set_linkage(Linkage::Private);
+        digit_fmt_global.set_unnamed_address(UnnamedAddress::Global);
 
         let long_digit_fmt = self.context.const_string(b"i64: %lld\n", true);
-        let long_digit_fmt_global = self.module.add_global(
-            long_digit_fmt.get_type(),
-            Some(AddressSpace::Global),
-            "long_digit_fmt",
-        );
+        let long_digit_fmt_global =
+            self.module
+                .add_global(long_digit_fmt.get_type(), None, "long_digit_fmt");
         long_digit_fmt_global.set_initializer(&long_digit_fmt.as_basic_value_enum());
+        long_digit_fmt_global.set_constant(true);
+        long_digit_fmt_global.set_linkage(Linkage::Private);
+        long_digit_fmt_global.set_unnamed_address(UnnamedAddress::Global);
 
         let print_i32_signature = ast::FunctionSignature::new(
             "printI32".into(),
@@ -614,12 +626,13 @@ impl<'a> Codegen<'a> {
         self.builder.build_return(Some(&data_value));
 
         let version_str = self.context.const_string(b"aoi v0.1", true);
-        let version_str_global = self.module.add_global(
-            version_str.get_type(),
-            Some(AddressSpace::Global),
-            "version_str",
-        );
+        let version_str_global =
+            self.module
+                .add_global(version_str.get_type(), None, "version_str");
         version_str_global.set_initializer(&version_str.as_basic_value_enum());
+        version_str_global.set_constant(true);
+        version_str_global.set_linkage(Linkage::Private);
+        version_str_global.set_unnamed_address(UnnamedAddress::Global);
 
         let version_signature = ast::FunctionSignature::new("version".into(), vec![], slice_type);
 
@@ -628,7 +641,17 @@ impl<'a> Codegen<'a> {
         self.builder.position_at_end(version_body);
 
         let version_slice = slice.const_named_struct(&[
-            version_str_global.as_pointer_value().as_basic_value_enum(),
+            unsafe {
+                self.builder.build_gep(
+                    version_str_global.as_pointer_value(),
+                    &[
+                        self.context.i64_type().const_zero(),
+                        self.context.i64_type().const_zero(),
+                    ],
+                    "get",
+                )
+            }
+            .as_basic_value_enum(),
             self.context
                 .i64_type()
                 .const_int(9, false)
