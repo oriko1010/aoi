@@ -64,7 +64,7 @@ impl<'a> Parser<'a> {
                 ..
             } => self.parse_bool().map(Into::into),
             Token { ttype: Symbol, .. } => self.parse_identifier().map(Into::into),
-            Token { ttype: Number, .. } => self.parse_integer().map(Into::into),
+            Token { ttype: Number, .. } => self.parse_number().map(Into::into),
             Token { ttype: String, .. } => self.parse_string().map(Into::into),
             Token {
                 ttype: LeftParen, ..
@@ -158,12 +158,27 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_number(&mut self) -> Result<Expression> {
+        match self.peek_token().lexeme.contains('.') {
+            true => self.parse_float().map(Into::into),
+            false => self.parse_integer().map(Into::into),
+        }
+    }
+
     fn parse_integer(&mut self) -> Result<Integer> {
         let lexeme = self.next_token().lexeme;
         let value = lexeme
             .parse::<u64>()
             .map_err(|_| anyhow!("Error parsing integer literal"))?;
         Ok(Integer::from(value))
+    }
+
+    fn parse_float(&mut self) -> Result<Float> {
+        let lexeme = self.next_token().lexeme;
+        let value = lexeme
+            .parse::<f64>()
+            .map_err(|_| anyhow!("Error parsing float literal"))?;
+        Ok(Float::from(value))
     }
 
     fn parse_string(&mut self) -> Result<String> {

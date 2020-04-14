@@ -1,110 +1,56 @@
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Expression {
-    Program(Program),
-    Function(Function),
-    Block(Block),
-    Integer(Integer),
-    Bool(Bool),
-    String(String),
-    Type(Type),
-    Identifier(Identifier),
-    Assign(Assign),
-    Return(Return),
-    UnaryOp(UnaryOp),
-    BinaryOp(BinaryOp),
-    Call(Call),
-    If(If),
+macro_rules! enum_structs {
+    (#[$attr:meta] $visiblity:vis enum $name:ident { $($field:ident( $($v:vis $f:ident : $t:ty),* )),* $(,)? }) => {
+        #[$attr]
+        $visiblity enum $name {
+            $($field($field),)*
+        }
+        $(
+            #[$attr]
+            $visiblity struct $field {
+                $($v $f: $t,)*
+            }
+
+            impl From<$field> for $name {
+                #[inline]
+                fn from(value: $field) -> Self {
+                    Self::$field(value)
+                }
+            }
+        )*
+    };
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Program {
-    pub expressions: Vec<Expression>,
+enum_structs! {
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum Expression {
+        Program(pub expressions: Vec<Expression>),
+        Function(pub signature: FunctionSignature, pub body: FunctionBody),
+        Block(pub expressions: Vec<Expression>),
+        Integer(pub value: u64),
+        Float(pub value: f64),
+        Bool(pub value: bool),
+        String(pub value: Box<str>),
+        Type(pub identifier: Identifier, pub generics: Option<Vec<Type>>),
+        Identifier(pub name: Box<str>),
+        Assign(pub identifier: Identifier, pub expression: Box<Expression>),
+        UnaryOp(pub op: Box<str>, pub expression: Box<Expression>),
+        BinaryOp(pub lhs: Box<Expression>, pub op: Box<str>, pub rhs: Box<Expression>),
+        Call(pub identifier: Identifier, pub arguments: Vec<Expression>),
+        If(pub condition: Box<Expression>, pub then: Box<Expression>, pub other: Option<Box<Expression>>),
+    }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Function {
-    pub signature: FunctionSignature,
-    pub body: FunctionBody,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FunctionSignature {
     pub identifier: Identifier,
     pub arguments: Vec<(Identifier, Type)>,
     pub return_type: Type,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum FunctionBody {
     Extern,
     Body(Box<Expression>),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Block {
-    pub expressions: Vec<Expression>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Integer {
-    pub value: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Bool {
-    pub value: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct String {
-    pub value: Box<str>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Identifier {
-    pub name: Box<str>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Type {
-    pub identifier: Identifier,
-    pub generics: Option<Vec<Type>>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct If {
-    pub condition: Box<Expression>,
-    pub then: Box<Expression>,
-    pub other: Option<Box<Expression>>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Assign {
-    pub identifier: Identifier,
-    pub expression: Box<Expression>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Return {
-    pub expression: Box<Expression>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UnaryOp {
-    pub op: Box<str>,
-    pub expression: Box<Expression>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BinaryOp {
-    pub lhs: Box<Expression>,
-    pub op: Box<str>,
-    pub rhs: Box<Expression>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Call {
-    pub identifier: Identifier,
-    pub arguments: Vec<Expression>,
 }
 
 impl Identifier {
@@ -129,6 +75,18 @@ impl Integer {
 
 impl From<u64> for Integer {
     fn from(value: u64) -> Self {
+        Self::new(value)
+    }
+}
+
+impl Float {
+    pub fn new(value: f64) -> Self {
+        Self { value }
+    }
+}
+
+impl From<f64> for Float {
+    fn from(value: f64) -> Self {
         Self::new(value)
     }
 }
@@ -238,33 +196,3 @@ impl If {
         }
     }
 }
-
-macro_rules! impl_trivial_from {
-    (for $t:ty { $($param:ident : $variant:ident),* $(,)? }) => {
-        $(
-            impl From<$variant> for $t {
-                #[inline]
-                fn from($param: $variant) -> Self {
-                    Self::$variant($param)
-                }
-            }
-        )*
-    };
-}
-
-impl_trivial_from!(for Expression {
-    program: Program,
-    function: Function,
-    block: Block,
-    integer: Integer,
-    r#bool: Bool,
-    string: String,
-    r#type: Type,
-    identifier: Identifier,
-    assign: Assign,
-    r#return: Return,
-    binary_op: BinaryOp,
-    unary_op: UnaryOp,
-    call: Call,
-    r#if: If,
-});

@@ -35,8 +35,14 @@ fn operators() {
 
 #[test]
 fn numbers() {
-    let tokens = lex("123 456");
-    let expect = vec![tok(Number, "123"), tok(Number, "456")];
+    let tokens = lex("123 456 8.8.8.8");
+    let expect = vec![
+        tok(Number, "123"),
+        tok(Number, "456"),
+        tok(Number, "8.8"),
+        tok(Operator, "."),
+        tok(Number, "8.8"),
+    ];
     equals(&tokens, &expect);
 }
 

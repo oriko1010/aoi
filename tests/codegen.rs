@@ -54,6 +54,21 @@ fn if_expr() {
 }
 
 #[test]
+fn floats() {
+    simple_test(
+        "fun floats(x f64) f64 -> {
+            let y = x + 1.0
+            y
+        }
+        fun main() i32 -> {
+            let a = floats(4.0)
+            0
+        }",
+        0,
+    );
+}
+
+#[test]
 fn everything() {
     simple_test(
         "fun puts(str *u8) i32 extern

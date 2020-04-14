@@ -4,8 +4,8 @@ use std::vec as ast;
 #[test]
 fn binary() {
     test(
-        "1 + 64",
-        ast![BinaryOp::new(Integer::new(1).into(), "+", Integer::new(64).into()).into()],
+        "1 + 64.0",
+        ast![BinaryOp::new(Integer::new(1).into(), "+", Float::new(64.0).into()).into()],
     );
 
     test(
@@ -94,10 +94,10 @@ fn assign() {
 #[test]
 fn block() {
     test(
-        "{ 1 + 2 3 }",
+        "{ 1 + 2 3.0 }",
         ast![Block::new(vec![
             BinaryOp::new(Integer::new(1).into(), "+", Integer::new(2).into()).into(),
-            Integer::new(3).into()
+            Float::new(3.0).into()
         ])
         .into()],
     );

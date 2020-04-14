@@ -90,15 +90,30 @@ impl<'a> Lexer<'a> {
                         None => break (self.code.len(), Operator),
                     }
                 },
-                '0'..='9' => loop {
-                    match self.chars.peek() {
-                        Some((_, '0'..='9')) => {
-                            self.chars.next();
+                '0'..='9' => {
+                    let mut has_decimal = false;
+                    loop {
+                        match self.chars.peek() {
+                            Some((_, '0'..='9')) => {
+                                self.chars.next();
+                            }
+                            Some(&(current, '.')) if !has_decimal => {
+                                let mut clone = self.chars.clone();
+                                clone.next();
+                                match clone.peek() {
+                                    Some((_, '0'..='9')) => {
+                                        has_decimal = true;
+                                        self.chars.next();
+                                        continue;
+                                    }
+                                    _ => break (current, Number),
+                                }
+                            }
+                            Some(&(current, _)) => break (current, Number),
+                            None => break (self.code.len(), Number),
                         }
-                        Some(&(current, _)) => break (current, Number),
-                        None => break (self.code.len(), Number),
                     }
-                },
+                }
                 _ => {
                     self.chars.next();
                     (current, Error)

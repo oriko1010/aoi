@@ -110,6 +110,9 @@ impl<'a> Codegen<'a> {
             ast::Expression::Integer(integer) => {
                 self.compile_integer(integer, target_type.unwrap_or(Type::Int(32)))
             }
+            ast::Expression::Float(float) => {
+                self.compile_float(float, target_type.unwrap_or(Type::F64))
+            }
             ast::Expression::Bool(boolean) => self.compile_bool(boolean),
             ast::Expression::String(string) => self.compile_string(string),
             ast::Expression::Identifier(identifier) => self.compile_identifier(identifier),
@@ -378,6 +381,9 @@ impl<'a> Codegen<'a> {
                 (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => {
                     return Ok(ty.value(self.builder.build_int_add(lhs, rhs, "add").into()));
                 }
+                (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => {
+                    return Ok(ty.value(self.builder.build_float_add(lhs, rhs, "add").into()));
+                }
                 _ => {
                     Err(anyhow!("Wrong llvm value in binary + op"))?;
                 }
@@ -386,6 +392,9 @@ impl<'a> Codegen<'a> {
             match (lhs.llvm_value.basic()?, rhs.llvm_value.basic()?) {
                 (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => {
                     return Ok(ty.value(self.builder.build_int_sub(lhs, rhs, "sub").into()));
+                }
+                (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => {
+                    return Ok(ty.value(self.builder.build_float_sub(lhs, rhs, "sub").into()));
                 }
                 _ => {
                     Err(anyhow!("Wrong llvm value in binary - op"))?;
@@ -396,6 +405,9 @@ impl<'a> Codegen<'a> {
                 (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => {
                     return Ok(ty.value(self.builder.build_int_mul(lhs, rhs, "mul").into()));
                 }
+                (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => {
+                    return Ok(ty.value(self.builder.build_float_mul(lhs, rhs, "mul").into()));
+                }
                 _ => {
                     Err(anyhow!("Wrong llvm value in binary * op"))?;
                 }
@@ -403,7 +415,14 @@ impl<'a> Codegen<'a> {
         } else if &*op == "/" {
             match (lhs.llvm_value.basic()?, rhs.llvm_value.basic()?) {
                 (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => {
-                    return Ok(ty.value(self.builder.build_int_signed_div(lhs, rhs, "div").into()));
+                    return match ty {
+                        Type::Int(_) => Ok(ty.value(self.builder.build_int_signed_div(lhs, rhs, "div").into())),
+                        Type::UInt(_) => Ok(ty.value(self.builder.build_int_unsigned_div(lhs, rhs, "div").into())),
+                        _ => bail!("Non int type"),
+                    }
+                }
+                (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => {
+                    return Ok(ty.value(self.builder.build_float_div(lhs, rhs, "div").into()));
                 }
                 _ => {
                     Err(anyhow!("Wrong llvm value in binary / op"))?;
@@ -454,6 +473,20 @@ impl<'a> Codegen<'a> {
             }
             _ => Err(anyhow!(
                 "Can't compile integer to target type {:?}",
+                target_type
+            )),
+        }
+    }
+
+    fn compile_float(&self, float: ast::Float, target_type: Type) -> Result<Value> {
+        match target_type {
+            Type::F16 | Type::F32 | Type::F64 | Type::F128 => {
+                let ty = target_type.map_to_float(self.context)?;
+                let value = ty.const_float(float.value);
+                Ok(target_type.value(value.into()))
+            }
+            _ => Err(anyhow!(
+                "Can't compile float to target type {:?}",
                 target_type
             )),
         }
