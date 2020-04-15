@@ -114,6 +114,7 @@ impl<'a> Codegen<'a> {
             ast::Expression::Function(function) => self.compile_function(function),
             ast::Expression::Call(call) => self.compile_call(call),
             ast::Expression::Block(block) => self.compile_block(block),
+            ast::Expression::UnaryOp(unary_op) => self.compile_unary_op(unary_op),
             ast::Expression::BinaryOp(binary_op) => self.compile_binary_op(binary_op),
             ast::Expression::Integer(integer) => self.compile_integer(
                 integer,
@@ -399,6 +400,41 @@ impl<'a> Codegen<'a> {
             (&else_value.llvm_value.basic()?, else_block),
         ]);
         Ok(phi_type.value(phi.as_basic_value().into()))
+    }
+
+    fn compile_unary_op(&mut self, unary_op: ast::UnaryOp) -> Result<Value<'a>> {
+        let ast::UnaryOp { op, expression } = unary_op;
+
+        let expr = self.compile_expresion(*expression, None)?;
+        let ty = expr.ty;
+
+        if &*op == "-" {
+            match expr.llvm_value.basic()? {
+                BasicValueEnum::IntValue(expr) => {
+                    return Ok(ty.clone().value(
+                        self.builder
+                            .build_int_sub(ty.llvm_type.integer()?.const_zero(), expr, "neg")
+                            .into(),
+                    ))
+                }
+                BasicValueEnum::FloatValue(expr) => {
+                    return Ok(ty.value(self.builder.build_float_neg(expr, "neg").into()))
+                }
+                _ => {
+                    Err(anyhow!("Wrong llvm value in unary - op"))?;
+                }
+            }
+        } else if &*op == "!" {
+            if ty.kind == TypeKind::Bool {
+                return Ok(ty.value(
+                    self.builder
+                        .build_not(expr.llvm_value.basic()?.into_int_value(), "not")
+                        .into(),
+                ));
+            }
+            return Err(anyhow!("Wrong llvm value in unary ! op"));
+        }
+        Err(anyhow!("Unknown unary op"))
     }
 
     fn compile_binary_op(&mut self, binary_op: ast::BinaryOp) -> Result<Value<'a>> {
