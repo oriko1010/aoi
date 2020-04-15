@@ -1,0 +1,13 @@
+type FILE extern
+fun fopen(filename *u8, mode *u8) *FILE extern
+fun fclose(stream *FILE) i32 extern
+fun fflush(stream *FILE) i32 extern
+
+fun fread(buffer *u8, size u64, count u64, stream *FILE) u64 extern
+fun fwrite(buffer *u8, size u64, count u64, stream *FILE) u64 extern
+
+fun getchar() i32 extern
+fun putchar(ch i32) i32 extern
+
+fun fputs(str *u8, stream *FILE) i32 extern
+fun puts(str *u8) i32 extern

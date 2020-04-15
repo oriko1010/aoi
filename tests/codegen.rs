@@ -1,4 +1,4 @@
-use aoi::{codegen, parser::Parser};
+use aoi::{codegen, parser::Parser, AoiOptions};
 
 #[test]
 fn return_i32() {
@@ -53,8 +53,8 @@ fn call_overloads() {
     );
     simple_test(
         "fun puts(str *u8) i32 extern
-        fun complex(a bool, x f64, z *u8) -> if a x.print() else puts(z)
-        fun complex(a bool, x i32, z *u8) i32 -> if a { x.print() x + 1 } else { puts(z) 0 }
+        fun complex(a bool, x f64, z *u8) -> if a { a } else puts(z)
+        fun complex(a bool, x i32, z *u8) i32 -> if a { x + 1 } else { 0 }
 
         fun main() i32 -> {
             let str = \"shouldn't be printed\"
@@ -83,7 +83,7 @@ fn if_expr() {
     simple_test("fun main() i32 -> if true 4 else 8", 4);
     simple_test("fun main() i32 -> if false 4 else 8", 8);
     simple_test(
-        "fun unit(x i32, y f64) -> if false x.print() else print(y) 
+        "fun unit(x i32, y f64) -> if false y + y else y - y 
         fun main() i32 -> {
             unit(1, 1)
             2
@@ -129,6 +129,19 @@ fn simple_test(code: &str, expect: i32) {
 
     let mut parser = Parser::new(&code);
     let program = parser.parse_program().expect("Error parsing program");
-    let result = codegen::compile(program, true, true, false).expect("Error compiling program");
+    let result = codegen::compile(
+        program,
+        &AoiOptions {
+            file: String::new(),
+            ast: false,
+            libc: false,
+            backtrace: false,
+            no_verify: false,
+            optimize: true,
+            parse: false,
+            show: false,
+        },
+    )
+    .expect("Error compiling program");
     assert_eq!(result, expect)
 }

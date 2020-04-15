@@ -10,6 +10,7 @@ pub struct Parser<'a> {
     lexer: Peekable<Lexer<'a>>,
 }
 
+const TYPE_KEYWORD: &str = "type";
 const FUN_KEYWORD: &str = "fun";
 const LET_KEYWORD: &str = "let";
 const IF_KEYWORD: &str = "if";
@@ -43,6 +44,11 @@ impl<'a> Parser<'a> {
         use TokenType::*;
 
         let mut lhs = match self.peek_token() {
+            Token {
+                ttype: Symbol,
+                lexeme: TYPE_KEYWORD,
+                ..
+            } => self.parse_type_definition().map(Into::into),
             Token {
                 ttype: Symbol,
                 lexeme: FUN_KEYWORD,
@@ -213,6 +219,18 @@ impl<'a> Parser<'a> {
             } => Ok(lexeme),
             _ => bail!("Error parsing operator"),
         }
+    }
+
+    fn parse_type_definition(&mut self) -> Result<TypeDefinition> {
+        self.expect_symbol(TYPE_KEYWORD)?;
+
+        let identifier = self.parse_identifier()?;
+        if self.peek_matches(TokenType::Symbol, EXTERN_KEYWORD) {
+            self.expect_symbol(EXTERN_KEYWORD)?;
+            return Ok(TypeDefinition::new_extern(identifier));
+        }
+
+        todo!()
     }
 
     fn parse_function(&mut self) -> Result<Function> {

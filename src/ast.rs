@@ -25,6 +25,7 @@ enum_structs! {
     pub enum Expression {
         Program(pub expressions: Vec<Expression>),
         Function(pub signature: FunctionSignature, pub body: FunctionBody),
+        TypeDefinition(pub identifier: Identifier, pub value: TypeBody),
         Block(pub expressions: Vec<Expression>),
         Integer(pub value: u64),
         Float(pub value: f64),
@@ -52,6 +53,12 @@ pub struct FunctionSignature {
 pub enum FunctionBody {
     Extern,
     Body(Box<Expression>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TypeBody {
+    Extern,
+    Alias(Type),
 }
 
 impl Identifier {
@@ -168,6 +175,15 @@ impl FunctionSignature {
             arguments,
             return_type,
             is_extern,
+        }
+    }
+}
+
+impl TypeDefinition {
+    pub fn new_extern(identifier: Identifier) -> Self {
+        Self {
+            identifier,
+            value: TypeBody::Extern,
         }
     }
 }
