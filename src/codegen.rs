@@ -950,36 +950,6 @@ impl<'a> LlvmValueWrapper<'a> {
     }
 }
 
-impl<'a> From<IntValue<'a>> for LlvmValueWrapper<'a> {
-    fn from(int: IntValue<'a>) -> Self {
-        Self::Basic(int.as_basic_value_enum())
-    }
-}
-
-impl<'a> From<FloatValue<'a>> for LlvmValueWrapper<'a> {
-    fn from(float: FloatValue<'a>) -> Self {
-        Self::Basic(float.as_basic_value_enum())
-    }
-}
-
-impl<'a> From<PointerValue<'a>> for LlvmValueWrapper<'a> {
-    fn from(pointer: PointerValue<'a>) -> Self {
-        Self::Basic(pointer.as_basic_value_enum())
-    }
-}
-
-impl<'a> From<BasicValueEnum<'a>> for LlvmValueWrapper<'a> {
-    fn from(basic: BasicValueEnum<'a>) -> Self {
-        Self::Basic(basic)
-    }
-}
-
-impl<'a> From<FunctionValue<'a>> for LlvmValueWrapper<'a> {
-    fn from(function: FunctionValue<'a>) -> Self {
-        Self::Any(Some(function.as_any_value_enum()))
-    }
-}
-
 #[derive(Clone, Debug)]
 enum LlvmTypeWrapper<'a> {
     Basic(BasicTypeEnum<'a>),
@@ -1033,44 +1003,33 @@ impl<'a> LlvmTypeWrapper<'a> {
     }
 }
 
-impl<'a> From<BasicTypeEnum<'a>> for LlvmTypeWrapper<'a> {
-    fn from(basic: BasicTypeEnum<'a>) -> Self {
-        Self::Basic(basic)
-    }
+macro_rules! wrapper_from {
+    ( for $wrapper:ty { $( $arg:ident: $from:ty => $which:ident($val:expr) ),* $(,)? } ) => {
+        $(
+            impl<'a> From<$from> for $wrapper {
+                #[inline]
+                fn from($arg: $from) -> Self {
+                    Self::$which($val)
+                }
+            }
+        )*
+    };
 }
 
-impl<'a> From<AnyTypeEnum<'a>> for LlvmTypeWrapper<'a> {
-    fn from(any: AnyTypeEnum<'a>) -> Self {
-        Self::Any(any)
-    }
-}
+wrapper_from! { for LlvmValueWrapper<'a> {
+    int: IntValue<'a> => Basic(int.as_basic_value_enum()),
+    float: FloatValue<'a> => Basic(float.as_basic_value_enum()),
+    pointer: PointerValue<'a> => Basic(pointer.as_basic_value_enum()),
+    function: FunctionValue<'a> => Any(Some(function.as_any_value_enum())),
+    basic: BasicValueEnum<'a> => Basic(basic),
+}}
 
-impl<'a> From<IntType<'a>> for LlvmTypeWrapper<'a> {
-    fn from(int: IntType<'a>) -> Self {
-        Self::Basic(int.as_basic_type_enum())
-    }
-}
-
-impl<'a> From<FloatType<'a>> for LlvmTypeWrapper<'a> {
-    fn from(float: FloatType<'a>) -> Self {
-        Self::Basic(float.as_basic_type_enum())
-    }
-}
-
-impl<'a> From<PointerType<'a>> for LlvmTypeWrapper<'a> {
-    fn from(pointer: PointerType<'a>) -> Self {
-        Self::Basic(pointer.as_basic_type_enum())
-    }
-}
-
-impl<'a> From<StructType<'a>> for LlvmTypeWrapper<'a> {
-    fn from(structure: StructType<'a>) -> Self {
-        Self::Basic(structure.as_basic_type_enum())
-    }
-}
-
-impl<'a> From<FunctionType<'a>> for LlvmTypeWrapper<'a> {
-    fn from(function: FunctionType<'a>) -> Self {
-        Self::Any(function.as_any_type_enum())
-    }
-}
+wrapper_from! { for LlvmTypeWrapper<'a> {
+    int: IntType<'a> => Basic(int.as_basic_type_enum()),
+    float: FloatType<'a> => Basic(float.as_basic_type_enum()),
+    pointer: PointerType<'a> => Basic(pointer.as_basic_type_enum()),
+    structure: StructType<'a> => Basic(structure.as_basic_type_enum()),
+    function: FunctionType<'a> => Any(function.as_any_type_enum()),
+    basic: BasicTypeEnum<'a> => Basic(basic),
+    any: AnyTypeEnum<'a> => Any(any),
+}}
