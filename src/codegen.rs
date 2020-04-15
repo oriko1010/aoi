@@ -13,7 +13,50 @@ use inkwell::{
     },
     AddressSpace, OptimizationLevel,
 };
-use std::{cell::RefCell, collections::HashMap};
+use std::collections::HashMap;
+
+pub fn compile(program: ast::Program, optimize: bool, verify: bool, print: bool) -> Result<i32> {
+    let context = Context::create();
+    let builder = context.create_builder();
+    let module = context.create_module("Aoi");
+    let fpm = PassManager::create(&module);
+    if optimize {
+        fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+        fpm.add_gvn_pass();
+        fpm.add_cfg_simplification_pass();
+        fpm.add_promote_memory_to_register_pass();
+        fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+    }
+    if verify {
+        fpm.add_verifier_pass();
+    }
+    fpm.initialize();
+    let execution_engine = module
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .unwrap();
+    let aoi = AoiContext::new();
+    let type_check = TypeCheck::new();
+    let named_values = HashMap::with_capacity(8);
+
+    let mut codegen = Codegen {
+        optimize,
+        print,
+        verify,
+        context: &context,
+        builder,
+        module,
+        fpm,
+        execution_engine,
+        aoi,
+        type_check,
+        named_values,
+    };
+
+    let result = codegen.compile(program);
+    result
+}
 
 pub struct Codegen<'a> {
     optimize: bool,
@@ -24,54 +67,15 @@ pub struct Codegen<'a> {
     module: Module<'a>,
     fpm: PassManager<FunctionValue<'a>>,
     execution_engine: ExecutionEngine<'a>,
-    aoi: RefCell<AoiContext<'a>>,
-    type_check: RefCell<TypeCheck>,
-    named_values: RefCell<HashMap<String, Value<'a>>>,
+    aoi: AoiContext<'a>,
+    type_check: TypeCheck,
+    named_values: HashMap<String, Value<'a>>,
 }
 
 const CALL_CONV: u32 = 8;
 
 impl<'a> Codegen<'a> {
-    pub fn new(context: &'a Context, optimize: bool, print: bool, verify: bool) -> Self {
-        let builder = context.create_builder();
-        let module = context.create_module("Aoi");
-        let fpm = PassManager::create(&module);
-        if optimize {
-            fpm.add_instruction_combining_pass();
-            fpm.add_reassociate_pass();
-            fpm.add_gvn_pass();
-            fpm.add_cfg_simplification_pass();
-            fpm.add_promote_memory_to_register_pass();
-            fpm.add_instruction_combining_pass();
-            fpm.add_reassociate_pass();
-        }
-        if verify {
-            fpm.add_verifier_pass();
-        }
-        fpm.initialize();
-        let execution_engine = module
-            .create_jit_execution_engine(OptimizationLevel::None)
-            .unwrap();
-        let aoi = RefCell::new(AoiContext::new());
-        let type_check = RefCell::new(TypeCheck::new());
-        let named_values = RefCell::new(HashMap::with_capacity(8));
-
-        Self {
-            optimize,
-            print,
-            verify,
-            context,
-            builder,
-            module,
-            fpm,
-            execution_engine,
-            aoi,
-            type_check,
-            named_values,
-        }
-    }
-
-    pub fn compile(&self, program: ast::Program) -> Result<i32> {
+    pub fn compile(&mut self, program: ast::Program) -> Result<i32> {
         self.define_stdlib()?;
 
         for expression in program.expressions {
@@ -98,10 +102,10 @@ impl<'a> Codegen<'a> {
     }
 
     fn compile_expresion(
-        &self,
+        &mut self,
         expression: ast::Expression,
         target_type: Option<Type>,
-    ) -> Result<Value> {
+    ) -> Result<Value<'a>> {
         match expression {
             ast::Expression::If(if_ast) => self.compile_if(if_ast, target_type),
             ast::Expression::Assign(assign) => self.compile_assign(assign),
@@ -122,55 +126,51 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn compile_function(&self, function: ast::Function) -> Result<Value> {
+    fn compile_function(&mut self, function: ast::Function) -> Result<Value<'a>> {
         let ast::Function { signature, body } = function;
 
         let function = self.declare_function(signature.clone())?;
 
         let body = match body {
-            ast::FunctionBody::Extern => {
-                return Ok(Type::Int(32).value(self.context.i32_type().const_zero().into()))
-            }
+            ast::FunctionBody::Extern => return Ok(Type::Unit.value(LlvmValueWrapper::UNIT)),
             ast::FunctionBody::Body(body) => body,
         };
 
-        let type_check = self.type_check.borrow();
-
         let block = self.context.append_basic_block(function, "body");
-        {
-            let mut named_values = self.named_values.borrow_mut();
-            named_values.clear();
 
-            let mut arg_names = Vec::with_capacity(signature.arguments.len());
-            let mut arg_types = Vec::with_capacity(signature.arguments.len());
-            for (arg_name, arg_type) in &signature.arguments {
-                arg_names.push(arg_name);
-                arg_types.push(
-                    type_check
-                        .resolve(&arg_type)
-                        .ok_or(anyhow!("Could not resolve argument type: {:?}", arg_type))?,
-                );
-            }
+        self.named_values.clear();
 
-            for (i, argument) in function.get_param_iter().enumerate() {
-                let alloca = self.create_alloca(function, &arg_names[i].name, &arg_types[i])?;
-                named_values.insert(
-                    (&*arg_names[i].name).to_string(),
-                    arg_types[i].clone().value(alloca.into()),
-                );
+        let mut arg_names = Vec::with_capacity(signature.arguments.len());
+        let mut arg_types = Vec::with_capacity(signature.arguments.len());
+        for (arg_name, arg_type) in &signature.arguments {
+            arg_names.push(arg_name);
+            arg_types.push(
+                self.type_check
+                    .resolve(&arg_type)
+                    .ok_or(anyhow!("Could not resolve argument type: {:?}", arg_type))?,
+            );
+        }
 
-                self.builder.position_at_end(block);
-                self.builder
-                    .build_store(alloca, argument.as_basic_value_enum());
-            }
+        for (i, argument) in function.get_param_iter().enumerate() {
+            let alloca = self.create_alloca(function, &arg_names[i].name, &arg_types[i])?;
+            self.named_values.insert(
+                (&*arg_names[i].name).to_string(),
+                arg_types[i].clone().value(alloca.into()),
+            );
+
+            self.builder.position_at_end(block);
+            self.builder
+                .build_store(alloca, argument.as_basic_value_enum());
         }
 
         self.builder.position_at_end(block);
-        let return_type = type_check.resolve(&signature.return_type).ok_or(anyhow!(
-            "Could not resolve return type: {:?}",
-            signature.return_type
-        ))?;
-        drop(type_check);
+        let return_type = self
+            .type_check
+            .resolve(&signature.return_type)
+            .ok_or(anyhow!(
+                "Could not resolve return type: {:?}",
+                signature.return_type
+            ))?;
 
         let value = self.compile_expresion(*body, Some(return_type.clone()))?;
         match return_type {
@@ -192,28 +192,28 @@ impl<'a> Codegen<'a> {
         Ok(value)
     }
 
-    fn compile_call(&self, call: ast::Call) -> Result<Value> {
+    fn compile_call(&mut self, call: ast::Call) -> Result<Value<'a>> {
         let ast::Call {
             identifier,
             arguments,
         } = call;
 
-        let aoi = self.aoi.borrow();
-        let type_check = self.type_check.borrow();
-
-        let (args, signature) = match aoi.signature_of(&identifier.name, arguments.len()) {
+        let (args, signature) = match self.aoi.signature_of(&identifier.name, arguments.len()) {
             SignatureMatch::None => bail!("No function signature {} found", identifier.name),
             SignatureMatch::Single(signature) => {
+                let signature = signature.clone();
                 let mut args = Vec::with_capacity(arguments.len());
                 for (i, argument) in arguments.into_iter().enumerate() {
                     let target_type = &signature.arguments[i].1;
-                    let target_type = type_check
+                    let target_type = self
+                        .type_check
                         .resolve(target_type)
-                        .ok_or(anyhow!("Could not resolve type {:?}", target_type))?;
+                        .ok_or(anyhow!("Could not resolve type {:?}", target_type))?
+                        .clone();
                     let arg = self.compile_expresion(argument, Some(target_type))?;
                     args.push(arg.llvm_value.basic()?);
                 }
-                (args, signature)
+                (args, signature.clone())
             }
             SignatureMatch::Multiple(multiple) => {
                 let mut args = Vec::with_capacity(arguments.len());
@@ -221,10 +221,10 @@ impl<'a> Codegen<'a> {
                 for signature in multiple.clone() {
                     let mut arg_types = Vec::new();
                     for i in 0..arguments.len() {
-                        let arg_type = type_check.resolve(&signature.arguments[i].1).unwrap();
+                        let arg_type = self.type_check.resolve(&signature.arguments[i].1).unwrap();
                         arg_types.push(arg_type);
                     }
-                    candidates.push((arg_types, signature));
+                    candidates.push((arg_types, signature.clone()));
                 }
 
                 for (i, argument) in arguments.into_iter().enumerate() {
@@ -245,18 +245,21 @@ impl<'a> Codegen<'a> {
 
                 match candidates.len() {
                     0 => bail!("No overload candidates found"),
-                    1 => (args, candidates[0].1),
+                    1 => (args, candidates[0].1.clone()),
                     _ => bail!("Multiple overloads found: {:?}", candidates),
                 }
             }
         };
 
-        let return_type = type_check.resolve(&signature.return_type).ok_or(anyhow!(
-            "Could not resolve return type {:?}",
-            signature.return_type
-        ))?;
+        let return_type = self
+            .type_check
+            .resolve(&signature.return_type)
+            .ok_or(anyhow!(
+                "Could not resolve return type {:?}",
+                signature.return_type
+            ))?;
 
-        let function = aoi.value_of(&signature)?;
+        let function = self.aoi.value_of(&signature)?;
 
         let call = self.builder.build_call(function, &args, "call");
         if signature.identifier != "main" && !signature.is_extern {
@@ -264,16 +267,13 @@ impl<'a> Codegen<'a> {
         }
 
         if let Some(call) = call.try_as_basic_value().left() {
-            // TODO: Undefined behavior, fix this
-            let value =
-                unsafe { std::mem::transmute::<_, Value<'a>>(return_type.value(call.into())) };
-            Ok(value)
+            Ok(return_type.value(call.into()))
         } else {
             Ok(Type::Unit.value(self.context.i32_type().const_zero().into()))
         }
     }
 
-    fn compile_assign(&self, assign: ast::Assign) -> Result<Value> {
+    fn compile_assign(&mut self, assign: ast::Assign) -> Result<Value<'a>> {
         let ast::Assign {
             identifier: ast::Identifier { name },
             expression,
@@ -284,7 +284,6 @@ impl<'a> Codegen<'a> {
         let function = self.current_function()?;
         let alloca = self.create_alloca(function, &*name, &value.ty)?;
         self.named_values
-            .borrow_mut()
             .insert((&*name).to_string(), value.ty.clone().value(alloca.into()));
 
         self.builder.position_at_end(
@@ -304,7 +303,7 @@ impl<'a> Codegen<'a> {
         Ok(value)
     }
 
-    fn compile_block(&self, block: ast::Block) -> Result<Value> {
+    fn compile_block(&mut self, block: ast::Block) -> Result<Value<'a>> {
         let ast::Block { expressions } = block;
         let mut last_value = None;
         for expression in expressions {
@@ -313,7 +312,7 @@ impl<'a> Codegen<'a> {
         last_value.ok_or(anyhow!("Empty block"))
     }
 
-    fn compile_if(&self, if_ast: ast::If, target_type: Option<Type>) -> Result<Value> {
+    fn compile_if(&mut self, if_ast: ast::If, target_type: Option<Type>) -> Result<Value<'a>> {
         let ast::If {
             condition,
             then,
@@ -364,10 +363,7 @@ impl<'a> Codegen<'a> {
         self.builder.position_at_end(merge_block);
 
         let phi_type = match target_type {
-            Some(Type::Unit) => {
-                // TODO: Add a safe way to construct unit/void
-                return Ok(Type::Unit.value(unsafe { std::mem::zeroed() }));
-            }
+            Some(Type::Unit) => return Ok(Type::Unit.value(LlvmValueWrapper::UNIT)),
             Some(ty) => ty.map_to_llvm_basic(self.context)?,
             None => self.context.i32_type().as_basic_type_enum(),
         };
@@ -380,18 +376,17 @@ impl<'a> Codegen<'a> {
         Ok(then_value.ty.value(phi.as_basic_value().into()))
     }
 
-    fn compile_binary_op(&self, binary_op: ast::BinaryOp) -> Result<Value> {
+    fn compile_binary_op(&mut self, binary_op: ast::BinaryOp) -> Result<Value<'a>> {
         let ast::BinaryOp { lhs, op, rhs } = binary_op;
 
         if &*op == "=" {
             if let ast::Expression::Identifier(ast::Identifier { name }) = *lhs {
                 let rhs = self.compile_expresion(*rhs, None)?;
-                let named_values = self.named_values.borrow_mut();
-                let value = {
-                    named_values
-                        .get(&*name)
-                        .ok_or(anyhow!("No variable named {} found", name))?
-                };
+                let value = self
+                    .named_values
+                    .get(&*name)
+                    .ok_or(anyhow!("No variable named {} found", name))?;
+
                 return match value.llvm_value {
                     LlvmValueWrapper::Basic(BasicValueEnum::PointerValue(ptr)) => {
                         self.builder.build_store(ptr, rhs.llvm_value.basic()?);
@@ -483,11 +478,10 @@ impl<'a> Codegen<'a> {
         Err(anyhow!("Unknown binary op"))
     }
 
-    fn compile_identifier(&self, identifier: ast::Identifier) -> Result<Value> {
+    fn compile_identifier(&self, identifier: ast::Identifier) -> Result<Value<'a>> {
         let ast::Identifier { name } = identifier;
-        let named_values = self.named_values.borrow();
 
-        if let Some(named_value) = named_values.get(&*name) {
+        if let Some(named_value) = self.named_values.get(&*name) {
             let load = match named_value.llvm_value {
                 LlvmValueWrapper::Basic(BasicValueEnum::PointerValue(ptr)) => {
                     self.builder.build_load(ptr, &*name)
@@ -503,14 +497,14 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn compile_bool(&self, boolean: ast::Bool) -> Result<Value> {
+    fn compile_bool(&self, boolean: ast::Bool) -> Result<Value<'a>> {
         let ty = Type::Bool;
         let llvm_ty = ty.map_to_boolean(self.context)?;
         let llvm_value = llvm_ty.const_int(if boolean.value { 1 } else { 0 }, false);
         Ok(Type::Bool.value(llvm_value.into()))
     }
 
-    fn compile_integer(&self, integer: ast::Integer, target_type: Type) -> Result<Value> {
+    fn compile_integer(&self, integer: ast::Integer, target_type: Type) -> Result<Value<'a>> {
         match target_type {
             Type::F16 | Type::F32 | Type::F64 | Type::F128 => {
                 let ty = target_type.map_to_float(self.context)?;
@@ -529,7 +523,7 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn compile_float(&self, float: ast::Float, target_type: Type) -> Result<Value> {
+    fn compile_float(&self, float: ast::Float, target_type: Type) -> Result<Value<'a>> {
         match target_type {
             Type::F16 | Type::F32 | Type::F64 | Type::F128 => {
                 let ty = target_type.map_to_float(self.context)?;
@@ -543,7 +537,7 @@ impl<'a> Codegen<'a> {
         }
     }
 
-    fn compile_string(&self, string: ast::String) -> Result<Value> {
+    fn compile_string(&self, string: ast::String) -> Result<Value<'a>> {
         let value = self.context.const_string(string.value.as_bytes(), true);
         let global = self.module.add_global(value.get_type(), None, "str");
         global.set_initializer(&value.as_basic_value_enum());
@@ -564,7 +558,7 @@ impl<'a> Codegen<'a> {
         Ok(Value::new(Type::Pointer(box Type::UInt(8)), get.into()))
     }
 
-    fn current_function(&self) -> Result<FunctionValue> {
+    fn current_function(&self) -> Result<FunctionValue<'a>> {
         self.builder
             .get_insert_block()
             .and_then(|block| block.get_parent())
@@ -591,7 +585,7 @@ impl<'a> Codegen<'a> {
         Ok(builder.build_alloca(ty, name))
     }
 
-    fn define_stdlib(&self) -> Result<()> {
+    fn define_stdlib(&mut self) -> Result<()> {
         let slice = self.context.struct_type(
             &[
                 self.context
@@ -751,17 +745,22 @@ impl<'a> Codegen<'a> {
         Ok(())
     }
 
-    fn declare_function(&self, signature: ast::FunctionSignature) -> Result<FunctionValue> {
-        let type_check = self.type_check.borrow();
-        let return_ty = type_check.resolve(&signature.return_type).ok_or(anyhow!(
-            "Error resolving function return type: {:?}",
-            signature.return_type
-        ))?;
+    fn declare_function(
+        &mut self,
+        signature: ast::FunctionSignature,
+    ) -> Result<FunctionValue<'a>> {
+        let return_ty = self
+            .type_check
+            .resolve(&signature.return_type)
+            .ok_or(anyhow!(
+                "Error resolving function return type: {:?}",
+                signature.return_type
+            ))?;
 
         let mut argument_types = Vec::with_capacity(signature.arguments.len());
         let mut argument_names = Vec::with_capacity(signature.arguments.len());
         for (argument_name, argument_ty) in &signature.arguments {
-            let argument_ty = type_check.resolve(&argument_ty).ok_or(anyhow!(
+            let argument_ty = self.type_check.resolve(&argument_ty).ok_or(anyhow!(
                 "Error resolving function parameter type: {:?}",
                 argument_ty
             ))?;
@@ -784,12 +783,11 @@ impl<'a> Codegen<'a> {
             }
         }
 
-        if signature.identifier != "name" && !signature.is_extern {
+        if signature.identifier != "main" && !signature.is_extern {
             llvm_fun.set_call_conventions(CALL_CONV);
         }
 
-        let mut aoi = self.aoi.borrow_mut();
-        aoi.add_signature(signature, llvm_fun)?;
+        self.aoi.add_signature(signature, llvm_fun)?;
 
         Ok(llvm_fun)
     }
@@ -841,7 +839,7 @@ impl<'a> AoiContext<'a> {
         found
     }
 
-    fn value_of(&self, signature: &ast::FunctionSignature) -> Result<FunctionValue> {
+    fn value_of(&self, signature: &ast::FunctionSignature) -> Result<FunctionValue<'a>> {
         let index = self
             .signatures
             .iter()
@@ -996,21 +994,24 @@ impl<'a> Value<'a> {
 #[derive(Debug)]
 enum LlvmValueWrapper<'a> {
     Basic(BasicValueEnum<'a>),
-    Any(AnyValueEnum<'a>),
+    Any(Option<AnyValueEnum<'a>>),
 }
 
 impl<'a> LlvmValueWrapper<'a> {
+    const UNIT: Self = Self::Any(None);
+
     fn basic(self) -> Result<BasicValueEnum<'a>> {
         match self {
             LlvmValueWrapper::Basic(basic) => Ok(basic),
-            _ => Err(anyhow!("Error getting basic llvm value"))?,
+            _ => Err(anyhow!("Error getting basic llvm value")),
         }
     }
 
     fn any(self) -> Result<AnyValueEnum<'a>> {
         match self {
-            LlvmValueWrapper::Any(any) => Ok(any),
-            _ => Err(anyhow!("Error getting any llvm value"))?,
+            LlvmValueWrapper::Any(Some(any)) => Ok(any),
+            LlvmValueWrapper::Any(None) => Err(anyhow!("Error getting any llvm value")),
+            _ => Err(anyhow!("Error getting any llvm value")),
         }
     }
 }
@@ -1041,7 +1042,7 @@ impl<'a> From<BasicValueEnum<'a>> for LlvmValueWrapper<'a> {
 
 impl<'a> From<FunctionValue<'a>> for LlvmValueWrapper<'a> {
     fn from(function: FunctionValue<'a>) -> Self {
-        Self::Any(function.as_any_value_enum())
+        Self::Any(Some(function.as_any_value_enum()))
     }
 }
 

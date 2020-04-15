@@ -1,5 +1,4 @@
-use aoi::{codegen::Codegen, parser::Parser};
-use inkwell::context::Context;
+use aoi::{codegen, parser::Parser};
 
 #[test]
 fn return_i32() {
@@ -130,8 +129,6 @@ fn simple_test(code: &str, expect: i32) {
 
     let mut parser = Parser::new(&code);
     let program = parser.parse_program().expect("Error parsing program");
-    let context = Context::create();
-    let codegen = Codegen::new(&context, true, false, true);
-    let result = codegen.compile(program).expect("Error compiling program");
+    let result = codegen::compile(program, true, true, false).expect("Error compiling program");
     assert_eq!(result, expect)
 }
