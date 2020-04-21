@@ -11,7 +11,7 @@ use inkwell::{
         AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
         PointerValue, UnnamedAddress,
     },
-    AddressSpace, OptimizationLevel,
+    AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
 };
 use std::collections::HashMap;
 use types::{AnyType, AnyTypeEnum, PointerType, StructType};
@@ -109,6 +109,7 @@ impl<'a> Codegen<'a> {
     ) -> Result<Value<'a>> {
         match expression {
             ast::Expression::If(if_ast) => self.compile_if(if_ast, target_type),
+            ast::Expression::For(for_ast) => self.compile_for(for_ast, target_type),
             ast::Expression::Assign(assign) => self.compile_assign(assign),
             ast::Expression::TypeDefinition(ty) => self.compile_type_definition(ty),
             ast::Expression::Function(function) => self.compile_function(function),
@@ -141,7 +142,21 @@ impl<'a> Codegen<'a> {
                     .add_type(TypeKind::Extern(def.identifier), opaque.into())?;
                 Ok(self.aoi.unit_value())
             }
-            _ => todo!(),
+            ast::TypeBody::Alias(alias) => {
+                let kind = self
+                    .aoi
+                    .type_kind_from_ast(&alias)
+                    .ok_or_else(|| anyhow!("Could not resolve type alias: {:?}", alias))?;
+
+                let ty = self
+                    .aoi
+                    .type_from_kind(kind.clone())
+                    .ok_or_else(|| anyhow!("Could not resolve llvm type alias: {:?}", kind))?;
+
+                self.aoi
+                    .add_type(TypeKind::Alias(def.identifier, box kind), ty.llvm_type)?;
+                Ok(self.aoi.unit_value())
+            }
         }
     }
 
@@ -398,6 +413,55 @@ impl<'a> Codegen<'a> {
         Ok(phi_type.value(phi.as_basic_value().into()))
     }
 
+    fn compile_for(
+        &mut self,
+        for_ast: ast::For,
+        target_type: Option<Type<'a>>,
+    ) -> Result<Value<'a>> {
+        let ast::For {
+            init,
+            condition,
+            iteration,
+            body,
+        } = for_ast;
+
+        self.compile_expresion(*init, None)?;
+
+        let function = self
+            .builder
+            .get_insert_block()
+            .and_then(|block| block.get_parent())
+            .ok_or_else(|| anyhow!("Could not find function when compiling for"))?;
+
+        let cond_block = self.context.append_basic_block(function, "cond");
+        let body_block = self.context.append_basic_block(function, "body");
+        let done_block = self.context.append_basic_block(function, "done");
+
+        self.builder.build_unconditional_branch(cond_block);
+        self.builder.position_at_end(cond_block);
+
+        let condition = self.compile_expresion(
+            *condition,
+            Some(self.aoi.type_from_kind(TypeKind::Bool).unwrap()),
+        )?;
+
+        self.builder.build_conditional_branch(
+            condition.llvm_value.basic()?.into_int_value(),
+            body_block,
+            done_block,
+        );
+
+        self.builder.position_at_end(body_block);
+
+        self.compile_expresion(*body, target_type)?;
+        self.compile_expresion(*iteration, None)?;
+        self.builder.build_unconditional_branch(cond_block);
+
+        self.builder.position_at_end(done_block);
+
+        Ok(self.aoi.unit_value())
+    }
+
     fn compile_unary_op(&mut self, unary_op: ast::UnaryOp) -> Result<Value<'a>> {
         let ast::UnaryOp { op, expression } = unary_op;
 
@@ -531,7 +595,64 @@ impl<'a> Codegen<'a> {
                     return Err(anyhow!("Wrong llvm value in binary / op"));
                 }
             }
+        } else if &*op == "<" {
+            match (lhs.llvm_value.basic()?, rhs.llvm_value.basic()?) {
+                (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => {
+                    return match ty.kind {
+                        TypeKind::Int(_) => Ok(ty.value(
+                            self.builder
+                                .build_int_compare(IntPredicate::SLT, lhs, rhs, "slt")
+                                .into(),
+                        )),
+                        TypeKind::UInt(_) => Ok(ty.value(
+                            self.builder
+                                .build_int_compare(IntPredicate::ULT, lhs, rhs, "slt")
+                                .into(),
+                        )),
+                        _ => bail!("Non int type"),
+                    }
+                }
+                (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => {
+                    return Ok(ty.value(
+                        self.builder
+                            .build_float_compare(FloatPredicate::ULT, lhs, rhs, "ult")
+                            .into(),
+                    ));
+                }
+                _ => {
+                    return Err(anyhow!("Wrong llvm value in binary < op"));
+                }
+            }
+        } else if &*op == ">" {
+            match (lhs.llvm_value.basic()?, rhs.llvm_value.basic()?) {
+                (BasicValueEnum::IntValue(lhs), BasicValueEnum::IntValue(rhs)) => {
+                    return match ty.kind {
+                        TypeKind::Int(_) => Ok(ty.value(
+                            self.builder
+                                .build_int_compare(IntPredicate::SGT, lhs, rhs, "sgt")
+                                .into(),
+                        )),
+                        TypeKind::UInt(_) => Ok(ty.value(
+                            self.builder
+                                .build_int_compare(IntPredicate::UGT, lhs, rhs, "ugt")
+                                .into(),
+                        )),
+                        _ => bail!("Non int type"),
+                    }
+                }
+                (BasicValueEnum::FloatValue(lhs), BasicValueEnum::FloatValue(rhs)) => {
+                    return Ok(ty.value(
+                        self.builder
+                            .build_float_compare(FloatPredicate::UGT, lhs, rhs, "ugt")
+                            .into(),
+                    ));
+                }
+                _ => {
+                    return Err(anyhow!("Wrong llvm value in binary > op"));
+                }
+            }
         }
+
         Err(anyhow!("Unknown binary op"))
     }
 
@@ -868,6 +989,9 @@ impl<'a> AoiContext<'a> {
                         TypeKind::Extern(identifier) if identifier == &other => {
                             return Some(ty.clone())
                         }
+                        TypeKind::Alias(identifier, alias) if identifier == &other => {
+                            return Some(*alias.clone())
+                        }
                         _ => continue,
                     }
                 }
@@ -909,6 +1033,7 @@ pub enum TypeKind {
     Slice(Box<TypeKind>),
     Function(Vec<TypeKind>, Box<TypeKind>),
     Extern(ast::Identifier),
+    Alias(ast::Identifier, Box<TypeKind>),
 }
 
 impl PartialEq for TypeKind {

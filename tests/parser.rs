@@ -149,6 +149,60 @@ fn program() {
     );
 }
 
+#[test]
+fn let_fun() {
+    test(
+        "let a = fun b() -> {}",
+        ast![Assign::new(
+            "a".into(),
+            Function::new(
+                FunctionSignature::new(
+                    "b".into(),
+                    vec![],
+                    Type::new("unit".into(), None).into(),
+                    false
+                ),
+                Block::new(vec![]).into()
+            )
+            .into()
+        )
+        .into()],
+    );
+    test(
+        "fun a() -> let b = c",
+        ast![Function::new(
+            FunctionSignature::new(
+                "a".into(),
+                vec![],
+                Type::new("unit".into(), None).into(),
+                false
+            ),
+            Assign::new("b".into(), Identifier::new("c").into()).into()
+        )
+        .into()],
+    );
+}
+
+#[test]
+fn let_if() {
+    test(
+        "let a = if true 1 else let f = 0 let b = a",
+        ast![
+            Assign::new(
+                "a".into(),
+                If::new(
+                    Bool::new(true).into(),
+                    Integer::new(1).into(),
+                    Some(Assign::new("f".into(), Integer::new(0).into()).into())
+                )
+                .into()
+            )
+            .into(),
+            Assign::new("b".into(), Identifier::new("a").into()).into()
+        ],
+    );
+}
+
 fn test(code: &str, expect: impl AsRef<[Expression]>) {
     let mut parser = Parser::new(code);
     let program = parser.parse_program().expect("Error parsing program");

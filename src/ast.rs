@@ -38,6 +38,7 @@ enum_structs! {
         BinaryOp(pub lhs: Box<Expression>, pub op: Box<str>, pub rhs: Box<Expression>),
         Call(pub identifier: Identifier, pub arguments: Vec<Expression>),
         If(pub condition: Box<Expression>, pub then: Box<Expression>, pub other: Option<Box<Expression>>),
+        For(pub init: Box<Expression>, pub condition: Box<Expression>, pub iteration: Box<Expression>, pub body: Box<Expression>),
     }
 }
 
@@ -186,6 +187,13 @@ impl TypeDefinition {
             value: TypeBody::Extern,
         }
     }
+
+    pub fn new_alias(identifier: Identifier, ty: Type) -> Self {
+        Self {
+            identifier,
+            value: TypeBody::Alias(ty),
+        }
+    }
 }
 
 impl Block {
@@ -218,6 +226,22 @@ impl If {
             condition: box condition,
             then: box then,
             other: other.map(Box::new),
+        }
+    }
+}
+
+impl For {
+    pub fn new(
+        init: Expression,
+        condition: Expression,
+        iteration: Expression,
+        body: Expression,
+    ) -> Self {
+        Self {
+            init: box init,
+            condition: box condition,
+            iteration: box iteration,
+            body: box body,
         }
     }
 }

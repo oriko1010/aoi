@@ -15,6 +15,7 @@ const FUN_KEYWORD: &str = "fun";
 const LET_KEYWORD: &str = "let";
 const IF_KEYWORD: &str = "if";
 const ELSE_KEYWORD: &str = "else";
+const FOR_KEYWORD: &str = "for";
 const EXTERN_KEYWORD: &str = "extern";
 const TRUE_KEYWORD: &str = "true";
 const FALSE_KEYWORD: &str = "false";
@@ -64,6 +65,11 @@ impl<'a> Parser<'a> {
                 lexeme: IF_KEYWORD,
                 ..
             } => self.parse_if().map(Into::into),
+            Token {
+                ttype: Symbol,
+                lexeme: FOR_KEYWORD,
+                ..
+            } => self.parse_for().map(Into::into),
             Token {
                 ttype: Symbol,
                 lexeme: TRUE_KEYWORD | FALSE_KEYWORD,
@@ -227,10 +233,11 @@ impl<'a> Parser<'a> {
         let identifier = self.parse_identifier()?;
         if self.peek_matches(TokenType::Symbol, EXTERN_KEYWORD) {
             self.expect_symbol(EXTERN_KEYWORD)?;
-            return Ok(TypeDefinition::new_extern(identifier));
+            Ok(TypeDefinition::new_extern(identifier))
+        } else {
+            let ty = self.parse_type()?;
+            Ok(TypeDefinition::new_alias(identifier, ty))
         }
-
-        todo!()
     }
 
     fn parse_function(&mut self) -> Result<Function> {
@@ -276,6 +283,17 @@ impl<'a> Parser<'a> {
             None
         };
         Ok(If::new(condition, then, other))
+    }
+
+    fn parse_for(&mut self) -> Result<For> {
+        self.expect_symbol(FOR_KEYWORD)?;
+        let init = self.parse_expression(0)?;
+        self.expect_operator(",")?;
+        let condition = self.parse_expression(0)?;
+        self.expect_operator(",")?;
+        let iteration = self.parse_expression(0)?;
+        let body = self.parse_expression(0)?;
+        Ok(For::new(init, condition, iteration, body))
     }
 
     fn parse_assign(&mut self) -> Result<Assign> {
@@ -420,6 +438,11 @@ fn binary_precedence(token: &Token) -> Option<(u8, u8)> {
             ttype: Number | String,
             ..
         } => (6, 5),
+        Token {
+            ttype: Operator,
+            lexeme: "<" | ">",
+            ..
+        } => (5, 6),
         Token {
             ttype: Operator,
             lexeme: "+" | "-",
