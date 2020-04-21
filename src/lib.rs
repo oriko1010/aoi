@@ -1,5 +1,5 @@
 #![feature(box_syntax, or_patterns)]
-#![allow(dead_code)]
+#![allow(dead_code, clippy::match_bool)]
 
 pub mod ast;
 pub mod codegen;

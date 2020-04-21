@@ -69,6 +69,13 @@ fn call_overloads() {
 #[test]
 fn variables() {
     simple_test(
+        "fun main() i32 -> {
+            let a = let b = let c = 4
+            a + b + c
+        }",
+        12,
+    );
+    simple_test(
         "fun a(x i32) i32 -> let y = x
         fun main() i32 -> {
             let z = a(100)
@@ -105,6 +112,18 @@ fn floats() {
         }",
         0,
     );
+}
+
+#[test]
+fn precedence() {
+    simple_test(
+        "fun main() i32 -> {
+            let a = -(-{ let d = 8 + 2 * 4 })
+            let b = { -2 + -2 }
+            let c = 1 - (a * b)
+        }",
+        65,
+    )
 }
 
 #[test]

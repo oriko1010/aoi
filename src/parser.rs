@@ -329,11 +329,11 @@ impl<'a> Parser<'a> {
         if self.peek_matches(TokenType::Operator, "*") {
             self.expect(TokenType::Operator, "*")?;
             let inner = self.parse_type()?;
-            return Ok(Type::new(Identifier::from("Pointer"), Some(vec![inner])));
+            Ok(Type::new(Identifier::from("Pointer"), Some(vec![inner])))
         } else if self.peek_matches(TokenType::Operator, "[]") {
             self.expect(TokenType::Operator, "[]")?;
             let inner = self.parse_type()?;
-            return Ok(Type::new(Identifier::from("Slice"), Some(vec![inner])));
+            Ok(Type::new(Identifier::from("Slice"), Some(vec![inner])))
         } else {
             let identifier = self.parse_identifier()?;
             Ok(Type::new(identifier, None))

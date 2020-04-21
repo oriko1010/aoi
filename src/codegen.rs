@@ -118,11 +118,11 @@ impl<'a> Codegen<'a> {
             ast::Expression::BinaryOp(binary_op) => self.compile_binary_op(binary_op),
             ast::Expression::Integer(integer) => self.compile_integer(
                 integer,
-                target_type.unwrap_or(self.aoi.type_from_kind(TypeKind::Int(32)).unwrap()),
+                target_type.unwrap_or_else(|| self.aoi.type_from_kind(TypeKind::Int(32)).unwrap()),
             ),
             ast::Expression::Float(float) => self.compile_float(
                 float,
-                target_type.unwrap_or(self.aoi.type_from_kind(TypeKind::F64).unwrap()),
+                target_type.unwrap_or_else(|| self.aoi.type_from_kind(TypeKind::F64).unwrap()),
             ),
             ast::Expression::Bool(boolean) => self.compile_bool(boolean),
             ast::Expression::String(string) => self.compile_string(string),
@@ -139,10 +139,10 @@ impl<'a> Codegen<'a> {
                 let opaque = self.context.opaque_struct_type(&*identifier.name);
                 self.aoi
                     .add_type(TypeKind::Extern(def.identifier), opaque.into())?;
-                return Ok(self.aoi.unit_value());
+                Ok(self.aoi.unit_value())
             }
             _ => todo!(),
-        };
+        }
     }
 
     fn compile_function(&mut self, function: ast::Function) -> Result<Value<'a>> {
@@ -166,7 +166,7 @@ impl<'a> Codegen<'a> {
             arg_types.push(
                 self.aoi
                     .type_from_ast(arg_type)
-                    .ok_or(anyhow!("Could not resolve argument type: {:?}", arg_type))?,
+                    .ok_or_else(|| anyhow!("Could not resolve argument type: {:?}", arg_type))?,
             );
         }
 
@@ -186,10 +186,7 @@ impl<'a> Codegen<'a> {
         let return_type = self
             .aoi
             .type_from_ast(&signature.return_type)
-            .ok_or(anyhow!(
-                "Could not resolve return type: {:?}",
-                signature.return_type
-            ))?;
+            .ok_or_else(|| anyhow!("Could not resolve return type: {:?}", signature.return_type))?;
 
         let value = self.compile_expresion(*body, Some(return_type.clone()))?;
         match return_type.kind {
@@ -227,12 +224,12 @@ impl<'a> Codegen<'a> {
                     let target_type = self
                         .aoi
                         .type_from_ast(target_type)
-                        .ok_or(anyhow!("Could not resolve type {:?}", target_type))?
+                        .ok_or_else(|| anyhow!("Could not resolve type {:?}", target_type))?
                         .clone();
                     let arg = self.compile_expresion(argument, Some(target_type))?;
                     args.push(arg.llvm_value.basic()?);
                 }
-                (args, signature.clone())
+                (args, signature)
             }
             SignatureMatch::Multiple(multiple) => {
                 let mut args = Vec::with_capacity(arguments.len());
@@ -273,10 +270,7 @@ impl<'a> Codegen<'a> {
         let return_type = self
             .aoi
             .type_from_ast(&signature.return_type)
-            .ok_or(anyhow!(
-                "Could not resolve return type {:?}",
-                signature.return_type
-            ))?;
+            .ok_or_else(|| anyhow!("Could not resolve return type {:?}", signature.return_type))?;
 
         let function = self.aoi.value_of(&signature)?;
 
@@ -312,15 +306,17 @@ impl<'a> Codegen<'a> {
         self.builder.position_at_end(
             function
                 .get_last_basic_block()
-                .ok_or(anyhow!("No basic blocks"))?,
+                .ok_or_else(|| anyhow!("No basic blocks"))?,
         );
 
         match value.llvm_value {
             LlvmValueWrapper::Basic(basic) => self.builder.build_store(alloca, basic),
-            _ => Err(anyhow!(
-                "Could not store non basic llvm value {:?}",
-                value.llvm_value
-            ))?,
+            _ => {
+                return Err(anyhow!(
+                    "Could not store non basic llvm value {:?}",
+                    value.llvm_value
+                ))
+            }
         };
 
         Ok(value)
@@ -332,7 +328,7 @@ impl<'a> Codegen<'a> {
         for expression in expressions {
             last_value = Some(self.compile_expresion(expression, None)?);
         }
-        last_value.ok_or(anyhow!("Empty block"))
+        last_value.ok_or_else(|| anyhow!("Empty block"))
     }
 
     fn compile_if(&mut self, if_ast: ast::If, target_type: Option<Type<'a>>) -> Result<Value<'a>> {
@@ -346,9 +342,9 @@ impl<'a> Codegen<'a> {
             .builder
             .get_insert_block()
             .and_then(|block| block.get_parent())
-            .ok_or(anyhow!("Could not find function when compiling if"))?;
+            .ok_or_else(|| anyhow!("Could not find function when compiling if"))?;
 
-        let other = other.ok_or(anyhow!("If expressions without else not yet allowed"))?;
+        let other = other.ok_or_else(|| anyhow!("If expressions without else not yet allowed"))?;
 
         let condition =
             self.compile_expresion(*condition, self.aoi.type_from_kind(TypeKind::Bool))?;
@@ -357,7 +353,7 @@ impl<'a> Codegen<'a> {
                 llvm_value: LlvmValueWrapper::Basic(basic),
                 ..
             } => basic.into_int_value(),
-            _ => Err(anyhow!("Error compiling if expression"))?,
+            _ => return Err(anyhow!("Error compiling if expression")),
         };
 
         let comparison = self.builder.build_int_compare(
@@ -421,7 +417,7 @@ impl<'a> Codegen<'a> {
                     return Ok(ty.value(self.builder.build_float_neg(expr, "neg").into()))
                 }
                 _ => {
-                    Err(anyhow!("Wrong llvm value in unary - op"))?;
+                    return Err(anyhow!("Wrong llvm value in unary - op"));
                 }
             }
         } else if &*op == "!" {
@@ -446,7 +442,7 @@ impl<'a> Codegen<'a> {
                 let value = self
                     .named_values
                     .get(&*name)
-                    .ok_or(anyhow!("No variable named {} found", name))?;
+                    .ok_or_else(|| anyhow!("No variable named {} found", name))?;
 
                 return match value.llvm_value {
                     LlvmValueWrapper::Basic(BasicValueEnum::PointerValue(ptr)) => {
@@ -470,12 +466,12 @@ impl<'a> Codegen<'a> {
         let ty = if lhs.ty.kind == rhs.ty.kind {
             lhs.ty
         } else {
-            Err(anyhow!(
+            return Err(anyhow!(
                 "Binary op {} types {:?} and {:?} don't match",
                 op,
                 lhs.ty,
                 rhs.ty
-            ))?
+            ));
         };
 
         if &*op == "+" {
@@ -487,7 +483,7 @@ impl<'a> Codegen<'a> {
                     return Ok(ty.value(self.builder.build_float_add(lhs, rhs, "add").into()));
                 }
                 _ => {
-                    Err(anyhow!("Wrong llvm value in binary + op"))?;
+                    return Err(anyhow!("Wrong llvm value in binary + op"));
                 }
             }
         } else if &*op == "-" {
@@ -499,7 +495,7 @@ impl<'a> Codegen<'a> {
                     return Ok(ty.value(self.builder.build_float_sub(lhs, rhs, "sub").into()));
                 }
                 _ => {
-                    Err(anyhow!("Wrong llvm value in binary - op"))?;
+                    return Err(anyhow!("Wrong llvm value in binary - op"));
                 }
             }
         } else if &*op == "*" {
@@ -511,7 +507,7 @@ impl<'a> Codegen<'a> {
                     return Ok(ty.value(self.builder.build_float_mul(lhs, rhs, "mul").into()));
                 }
                 _ => {
-                    Err(anyhow!("Wrong llvm value in binary * op"))?;
+                    return Err(anyhow!("Wrong llvm value in binary * op"));
                 }
             }
         } else if &*op == "/" {
@@ -532,7 +528,7 @@ impl<'a> Codegen<'a> {
                     return Ok(ty.value(self.builder.build_float_div(lhs, rhs, "div").into()));
                 }
                 _ => {
-                    Err(anyhow!("Wrong llvm value in binary / op"))?;
+                    return Err(anyhow!("Wrong llvm value in binary / op"));
                 }
             }
         }
@@ -547,10 +543,12 @@ impl<'a> Codegen<'a> {
                 LlvmValueWrapper::Basic(BasicValueEnum::PointerValue(ptr)) => {
                     self.builder.build_load(ptr, &*name)
                 }
-                _ => Err(anyhow!(
-                    "Tried to load from non pointer llvm value {:?}",
-                    named_value.llvm_value
-                ))?,
+                _ => {
+                    return Err(anyhow!(
+                        "Tried to load from non pointer llvm value {:?}",
+                        named_value.llvm_value
+                    ))
+                }
             };
             Ok(named_value.ty.clone().value(load.into()))
         } else {
@@ -640,7 +638,7 @@ impl<'a> Codegen<'a> {
         self.builder
             .get_insert_block()
             .and_then(|block| block.get_parent())
-            .ok_or(anyhow!("Could not get current function."))
+            .ok_or_else(|| anyhow!("Could not get current function."))
     }
 
     fn create_alloca(
@@ -653,7 +651,7 @@ impl<'a> Codegen<'a> {
 
         let block = function
             .get_first_basic_block()
-            .ok_or(anyhow!("No basic block in function"))?;
+            .ok_or_else(|| anyhow!("No basic block in function"))?;
         match block.get_first_instruction() {
             Some(first) => builder.position_before(&first),
             None => builder.position_at_end(block),
@@ -666,18 +664,19 @@ impl<'a> Codegen<'a> {
         let return_ty = self
             .aoi
             .type_kind_from_ast(&signature.return_type)
-            .ok_or(anyhow!(
-                "Error resolving function return type: {:?}",
-                signature.return_type
-            ))?;
+            .ok_or_else(|| {
+                anyhow!(
+                    "Error resolving function return type: {:?}",
+                    signature.return_type
+                )
+            })?;
 
         let mut argument_types = Vec::with_capacity(signature.arguments.len());
         let mut argument_names = Vec::with_capacity(signature.arguments.len());
         for (argument_name, argument_ty) in &signature.arguments {
-            let argument_ty = self.aoi.type_kind_from_ast(argument_ty).ok_or(anyhow!(
-                "Error resolving function parameter type: {:?}",
-                argument_ty
-            ))?;
+            let argument_ty = self.aoi.type_kind_from_ast(argument_ty).ok_or_else(|| {
+                anyhow!("Error resolving function parameter type: {:?}", argument_ty)
+            })?;
             argument_names.push(argument_name);
             argument_types.push(argument_ty);
         }
@@ -685,7 +684,7 @@ impl<'a> Codegen<'a> {
         let fun_ty = self
             .aoi
             .type_from_kind(TypeKind::Function(argument_types, box return_ty))
-            .ok_or(anyhow!("WAAAH"))?;
+            .ok_or_else(|| anyhow!("Error resolving function type"))?;
 
         let llvm_fun = self.module.add_function(
             &signature.identifier.name,
@@ -784,7 +783,7 @@ impl<'a> AoiContext<'a> {
             .functions
             .iter()
             .position(|s| s == signature)
-            .ok_or(anyhow!("No function signature {:?} found.", signature))?;
+            .ok_or_else(|| anyhow!("No function signature {:?} found.", signature))?;
         Ok(self.fun_values[index])
     }
 
@@ -835,7 +834,7 @@ impl<'a> AoiContext<'a> {
             }
             other => {
                 let index = self.types.iter().position(|f| *f == other)?;
-                Type::new(other, self.ty_values[index].clone().into()).into()
+                Type::new(other, self.ty_values[index].clone()).into()
             }
         }
     }

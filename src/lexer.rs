@@ -16,7 +16,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next(&mut self) -> Token<'a> {
+    fn next_token(&mut self) -> Token<'a> {
         let mut in_comment = false;
         let current = loop {
             match self.chars.peek() {
@@ -132,7 +132,7 @@ impl<'a> Iterator for Lexer<'a> {
     type Item = Token<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.next() {
+        match self.next_token() {
             Token { ttype: Error, .. } => None,
             Token { ttype: Eof, .. } => None,
             token => Some(token),

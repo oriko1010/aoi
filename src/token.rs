@@ -12,7 +12,7 @@ pub enum TokenType {
     Eof,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Token<'a> {
     pub ttype: TokenType,
     pub trivia: &'a str,
