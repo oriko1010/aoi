@@ -1,4 +1,4 @@
-### Data types
+### Built-in types
 
 Aoi has several built-in data types
 
@@ -14,6 +14,14 @@ f64 | 64-bit floating point
 f128 | 128-bit floating point
 *T | pointer to T
 []T | slice of T with a u64 length
+
+### Type definitions
+
+A type alias starts with a `type` keyword, followed by an identifier and a type to alias.
+`type Size u64`
+
+An external type can be defined by following the identifier with an `extern` keyword instead.
+`type FILE extern`
 
 ### Variables
 
@@ -113,11 +121,19 @@ The condition expression has to be a `bool` type (note: despite being the same i
 The then and else expressions have to be of the same type. The expression evaluates to the successful branch.
 
 ```
-fun short(cond bool) i128 -> if cond 2 else 4 + 8
+let short = if cond 2 else 4 + 8
+let explicit = if cond { 2 } else { 4 + 8 }
+```
 
-fun explicit(cond bool) i128 -> {
-    if cond { 2 } else { 4 + 8 }
+### For expressions
+
+A `for` expression has an init expression, a condition expression, and an iteration expression separated by commas. Following without a comma is the body expression. The body expression does not have to be a block. The expression as a whole currently evaluates to `unit`.
+
+```
+for let i = 0, i < 10, i = i + 1 { // body is a block expression
+    "for".puts()
 }
+for let x = 0, x < 3, x = x + 1 puts("for") // body is a function call
 ```
 
 ### Block expressions
