@@ -127,6 +127,31 @@ fn precedence() {
 }
 
 #[test]
+#[should_panic]
+fn scope() {
+    simple_test(
+        "fun leak() *u8 -> let str = \"hello!\"
+        fun main() i32 -> {
+            str.puts()
+            0
+        }",
+        0,
+    )
+}
+
+#[test]
+#[should_panic]
+fn scope2() {
+    simple_test(
+        "fun main() i32 -> {
+            let scope = { let hidden = 24 }
+            hidden
+        }",
+        24,
+    )
+}
+
+#[test]
 fn everything() {
     simple_test(
         "fun puts(str *u8) i32 extern

@@ -36,9 +36,9 @@ pub fn compile(program: ast::Program, opts: &AoiOptions) -> Result<i32> {
     fpm.initialize();
     let execution_engine = module
         .create_jit_execution_engine(OptimizationLevel::None)
-        .unwrap();
+        .map_err(|e| anyhow!("{}", e))?;
     let aoi = AoiContext::new(&context);
-    let named_values = HashMap::with_capacity(8);
+    let scopes = Vec::with_capacity(8);
 
     let mut codegen = Codegen {
         optimize: opts.optimize,
@@ -50,7 +50,7 @@ pub fn compile(program: ast::Program, opts: &AoiOptions) -> Result<i32> {
         fpm,
         execution_engine,
         aoi,
-        named_values,
+        scopes,
     };
 
     if opts.libc {
@@ -76,7 +76,7 @@ pub struct Codegen<'a> {
     fpm: PassManager<FunctionValue<'a>>,
     execution_engine: ExecutionEngine<'a>,
     aoi: AoiContext<'a>,
-    named_values: HashMap<String, Value<'a>>,
+    scopes: Vec<Scope<'a>>,
 }
 
 const CALL_CONV: u32 = 8;
@@ -171,8 +171,8 @@ impl<'a> Codegen<'a> {
         };
 
         let block = self.context.append_basic_block(function, "body");
-
-        self.named_values.clear();
+        
+        self.enter_scope();
 
         let mut arg_names = Vec::with_capacity(signature.arguments.len());
         let mut arg_types = Vec::with_capacity(signature.arguments.len());
@@ -187,8 +187,8 @@ impl<'a> Codegen<'a> {
 
         for (i, argument) in function.get_param_iter().enumerate() {
             let alloca = self.create_alloca(function, &arg_names[i].name, arg_types[i].clone())?;
-            self.named_values.insert(
-                (&*arg_names[i].name).to_string(),
+            self.current_scope().unwrap().insert(
+                &*arg_names[i].name,
                 arg_types[i].clone().value(alloca.into()),
             );
 
@@ -214,6 +214,8 @@ impl<'a> Codegen<'a> {
                 ),
             },
         };
+
+        self.exit_scope()?;
 
         if self.verify {
             function.verify(true);
@@ -315,8 +317,9 @@ impl<'a> Codegen<'a> {
 
         let function = self.current_function()?;
         let alloca = self.create_alloca(function, &*name, value.ty.clone())?;
-        self.named_values
-            .insert((&*name).to_string(), value.ty.clone().value(alloca.into()));
+        self.current_scope()
+            .unwrap()
+            .insert(&*name, value.ty.clone().value(alloca.into()));
 
         self.builder.position_at_end(
             function
@@ -339,10 +342,14 @@ impl<'a> Codegen<'a> {
 
     fn compile_block(&mut self, block: ast::Block) -> Result<Value<'a>> {
         let ast::Block { expressions } = block;
+
+        self.enter_scope();
         let mut last_value = None;
         for expression in expressions {
             last_value = Some(self.compile_expresion(expression, None)?);
         }
+        self.exit_scope()?;
+
         last_value.ok_or_else(|| anyhow!("Empty block"))
     }
 
@@ -503,10 +510,7 @@ impl<'a> Codegen<'a> {
         if &*op == "=" {
             if let ast::Expression::Identifier(ast::Identifier { name }) = *lhs {
                 let rhs = self.compile_expresion(*rhs, None)?;
-                let value = self
-                    .named_values
-                    .get(&*name)
-                    .ok_or_else(|| anyhow!("No variable named {} found", name))?;
+                let value = self.value_in_scope(&*name)?;
 
                 return match value.llvm_value {
                     LlvmValueWrapper::Basic(BasicValueEnum::PointerValue(ptr)) => {
@@ -659,22 +663,17 @@ impl<'a> Codegen<'a> {
     fn compile_identifier(&self, identifier: ast::Identifier) -> Result<Value<'a>> {
         let ast::Identifier { name } = identifier;
 
-        if let Some(named_value) = self.named_values.get(&*name) {
-            let load = match named_value.llvm_value {
-                LlvmValueWrapper::Basic(BasicValueEnum::PointerValue(ptr)) => {
-                    self.builder.build_load(ptr, &*name)
-                }
-                _ => {
-                    return Err(anyhow!(
-                        "Tried to load from non pointer llvm value {:?}",
-                        named_value.llvm_value
-                    ))
-                }
-            };
-            Ok(named_value.ty.clone().value(load.into()))
-        } else {
-            Err(anyhow!("No named value {} found", name))
-        }
+        let named_value = self.value_in_scope(&*name)?;
+        let load = match named_value.llvm_value {
+            LlvmValueWrapper::Basic(BasicValueEnum::PointerValue(ptr)) => {
+                self.builder.build_load(ptr, &*name)
+            }
+            _ => bail!(
+                "Tried to load from non pointer llvm value {:?}",
+                named_value.llvm_value
+            ),
+        };
+        Ok(named_value.ty.clone().value(load.into()))
     }
 
     fn compile_bool(&self, boolean: ast::Bool) -> Result<Value<'a>> {
@@ -828,6 +827,32 @@ impl<'a> Codegen<'a> {
         self.aoi.add_signature(signature, llvm_fun)?;
 
         Ok(llvm_fun)
+    }
+
+    fn enter_scope(&mut self) {
+        let scope = Scope::new();
+        self.scopes.push(scope);
+    }
+
+    fn exit_scope(&mut self) -> Result<()> {
+        self.scopes
+            .pop()
+            .map(|_| ())
+            .ok_or_else(|| anyhow!("Tried exiting a scope when there's none left."))
+    }
+
+    fn current_scope(&mut self) -> Option<&mut Scope<'a>> {
+        self.scopes.last_mut()
+    }
+
+    fn value_in_scope(&self, name: &str) -> Result<&Value<'a>> {
+        for scope in self.scopes.iter().rev() {
+            match scope.values.get(name) {
+                Some(value) => return Ok(value),
+                None => continue,
+            }
+        }
+        bail!("No value named {} found in scope", name)
     }
 }
 
@@ -1017,6 +1042,23 @@ enum SignatureMatch<'a> {
     None,
     Single(&'a ast::FunctionSignature),
     Multiple(Vec<&'a ast::FunctionSignature>),
+}
+
+#[derive(Debug)]
+struct Scope<'a> {
+    values: HashMap<String, Value<'a>>,
+}
+
+impl<'a> Scope<'a> {
+    fn new() -> Self {
+        Self {
+            values: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, name: &str, value: Value<'a>) {
+        self.values.insert(name.to_owned(), value);
+    }
 }
 
 #[derive(Clone, Debug)]

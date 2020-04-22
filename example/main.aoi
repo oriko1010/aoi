@@ -1,10 +1,9 @@
-fun precedence(x i32, y i32, z i64) i32 -> 0
-fun precedence(x i32, y i32, z i32) i32 -> x + y * z
-
-fun not(value bool) bool -> if value false else true
+fun floats(x f64) f64 -> {
+    let y = x + 1.0
+    y
+}
 
 fun main() i32 -> {
-    puts("everything works!")
-    let val = if false.not() precedence(1, 2, 4) else { 0 } // 1 + (2 * 4)
-    val = val + val // 9 + 9
+    let a = floats(4.0)
+    0
 }
