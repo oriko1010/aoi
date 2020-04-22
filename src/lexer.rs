@@ -1,5 +1,6 @@
 use crate::token::{Token, TokenType::*};
 use std::{iter::Peekable, str::CharIndices};
+use unicode_xid::UnicodeXID;
 
 pub struct Lexer<'a> {
     code: &'a str,
@@ -67,15 +68,6 @@ impl<'a> Lexer<'a> {
                         None => break (self.code.len(), Error),
                     }
                 },
-                'a'..='z' | 'A'..='Z' | '_' => loop {
-                    match self.chars.peek() {
-                        Some((_, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')) => {
-                            self.chars.next();
-                        }
-                        Some(&(current, _)) => break (current, Symbol),
-                        None => break (self.code.len(), Symbol),
-                    }
-                },
                 '=' | '+' | '-' | '*' | '/' | '%' | ';' | ',' | '.' | '<' | '>' | '[' | ']'
                 | '!' => loop {
                     match self.chars.peek() {
@@ -114,6 +106,15 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 }
+                ch if ch.is_xid_start() => loop {
+                    match self.chars.peek() {
+                        Some((_, ch)) if ch.is_xid_continue() => {
+                            self.chars.next();
+                        }
+                        Some(&(current, _)) => break (current, Symbol),
+                        None => break (self.code.len(), Symbol),
+                    }
+                },
                 _ => {
                     self.chars.next();
                     (current, Error)

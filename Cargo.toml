@@ -9,3 +9,4 @@ anyhow = "1.0"
 clap = { git = "https://github.com/clap-rs/clap/" }
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm10-0" }
 rustyline = "6.1"
+unicode-xid = "0.2"

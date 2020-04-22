@@ -6,7 +6,10 @@ use inkwell::{
     execution_engine::{ExecutionEngine, JitFunction},
     module::{Linkage, Module},
     passes::PassManager,
-    types::{self, BasicType, BasicTypeEnum, FloatType, FunctionType, IntType},
+    types::{
+        AnyType, AnyTypeEnum, BasicType, BasicTypeEnum, FloatType, FunctionType, IntType,
+        PointerType, StructType,
+    },
     values::{
         AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FloatValue, FunctionValue, IntValue,
         PointerValue, UnnamedAddress,
@@ -14,7 +17,6 @@ use inkwell::{
     AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel,
 };
 use std::collections::HashMap;
-use types::{AnyType, AnyTypeEnum, PointerType, StructType};
 
 pub fn compile(program: ast::Program, opts: &AoiOptions) -> Result<i32> {
     let context = Context::create();
@@ -171,7 +173,7 @@ impl<'a> Codegen<'a> {
         };
 
         let block = self.context.append_basic_block(function, "body");
-        
+
         self.enter_scope();
 
         let mut arg_names = Vec::with_capacity(signature.arguments.len());

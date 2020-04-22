@@ -54,6 +54,18 @@ fn strings() {
 }
 
 #[test]
+fn unicode() {
+    let tokens = lex("let 平仮名4 = \"ひらがな\"");
+    let expect = vec![
+        tok(Symbol, "let"),
+        tok(Symbol, "平仮名4"),
+        tok(Operator, "="),
+        tok(String, "\"ひらがな\""),
+    ];
+    equals(&tokens, &expect);
+}
+
+#[test]
 fn trivia() {
     let (ref x5, ref x10) = (" ".repeat(5), " ".repeat(10));
     let comment = "// comment\n";
