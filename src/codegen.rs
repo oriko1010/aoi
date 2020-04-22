@@ -145,18 +145,31 @@ impl<'a> Codegen<'a> {
                 Ok(self.aoi.unit_value())
             }
             ast::TypeBody::Alias(alias) => {
-                let kind = self
-                    .aoi
-                    .type_kind_from_ast(&alias)
-                    .ok_or_else(|| anyhow!("Could not resolve type alias: {:?}", alias))?;
+                let kind = self.aoi.type_kind_from_ast(&alias)?;
 
-                let ty = self
-                    .aoi
-                    .type_from_kind(kind.clone())
-                    .ok_or_else(|| anyhow!("Could not resolve llvm type alias: {:?}", kind))?;
+                let ty = self.aoi.type_from_kind(kind.clone())?;
 
                 self.aoi
                     .add_type(TypeKind::Alias(def.identifier, box kind), ty.llvm_type)?;
+                Ok(self.aoi.unit_value())
+            }
+            ast::TypeBody::Struct(structure) => {
+                let mut field_types = Vec::with_capacity(structure.fields.len());
+                let mut field_kinds = Vec::with_capacity(structure.fields.len());
+
+                for (_, ty) in structure.fields {
+                    let kind = self.aoi.type_kind_from_ast(&ty)?;
+                    let ty = self.aoi.type_from_kind(kind.clone())?;
+
+                    field_types.push(ty.llvm_type.basic()?);
+                    field_kinds.push(kind);
+                }
+
+                let ty = self.context.struct_type(&field_types, false);
+
+                self.aoi
+                    .add_type(TypeKind::Struct(def.identifier, field_kinds), ty.into())?;
+
                 Ok(self.aoi.unit_value())
             }
         }
@@ -180,11 +193,7 @@ impl<'a> Codegen<'a> {
         let mut arg_types = Vec::with_capacity(signature.arguments.len());
         for (arg_name, arg_type) in &signature.arguments {
             arg_names.push(arg_name);
-            arg_types.push(
-                self.aoi
-                    .type_from_ast(arg_type)
-                    .ok_or_else(|| anyhow!("Could not resolve argument type: {:?}", arg_type))?,
-            );
+            arg_types.push(self.aoi.type_from_ast(arg_type)?);
         }
 
         for (i, argument) in function.get_param_iter().enumerate() {
@@ -200,10 +209,7 @@ impl<'a> Codegen<'a> {
         }
 
         self.builder.position_at_end(block);
-        let return_type = self
-            .aoi
-            .type_from_ast(&signature.return_type)
-            .ok_or_else(|| anyhow!("Could not resolve return type: {:?}", signature.return_type))?;
+        let return_type = self.aoi.type_from_ast(&signature.return_type)?;
 
         let value = self.compile_expresion(*body, Some(return_type.clone()))?;
         match return_type.kind {
@@ -240,11 +246,7 @@ impl<'a> Codegen<'a> {
                 let mut args = Vec::with_capacity(arguments.len());
                 for (i, argument) in arguments.into_iter().enumerate() {
                     let target_type = &signature.arguments[i].1;
-                    let target_type = self
-                        .aoi
-                        .type_from_ast(target_type)
-                        .ok_or_else(|| anyhow!("Could not resolve type {:?}", target_type))?
-                        .clone();
+                    let target_type = self.aoi.type_from_ast(target_type)?.clone();
                     let arg = self.compile_expresion(argument, Some(target_type))?;
                     args.push(arg.llvm_value.basic()?);
                 }
@@ -286,10 +288,7 @@ impl<'a> Codegen<'a> {
             }
         };
 
-        let return_type = self
-            .aoi
-            .type_from_ast(&signature.return_type)
-            .ok_or_else(|| anyhow!("Could not resolve return type {:?}", signature.return_type))?;
+        let return_type = self.aoi.type_from_ast(&signature.return_type)?;
 
         let function = self.aoi.value_of(&signature)?;
 
@@ -371,7 +370,7 @@ impl<'a> Codegen<'a> {
         let other = other.ok_or_else(|| anyhow!("If expressions without else not yet allowed"))?;
 
         let condition =
-            self.compile_expresion(*condition, self.aoi.type_from_kind(TypeKind::Bool))?;
+            self.compile_expresion(*condition, self.aoi.type_from_kind(TypeKind::Bool).ok())?;
         let condition = match condition {
             Value {
                 llvm_value: LlvmValueWrapper::Basic(basic),
@@ -783,30 +782,19 @@ impl<'a> Codegen<'a> {
     }
 
     fn declare_function(&mut self, signature: ast::FunctionSignature) -> Result<FunctionValue<'a>> {
-        let return_ty = self
-            .aoi
-            .type_kind_from_ast(&signature.return_type)
-            .ok_or_else(|| {
-                anyhow!(
-                    "Error resolving function return type: {:?}",
-                    signature.return_type
-                )
-            })?;
+        let return_ty = self.aoi.type_kind_from_ast(&signature.return_type)?;
 
         let mut argument_types = Vec::with_capacity(signature.arguments.len());
         let mut argument_names = Vec::with_capacity(signature.arguments.len());
         for (argument_name, argument_ty) in &signature.arguments {
-            let argument_ty = self.aoi.type_kind_from_ast(argument_ty).ok_or_else(|| {
-                anyhow!("Error resolving function parameter type: {:?}", argument_ty)
-            })?;
+            let argument_ty = self.aoi.type_kind_from_ast(argument_ty)?;
             argument_names.push(argument_name);
             argument_types.push(argument_ty);
         }
 
         let fun_ty = self
             .aoi
-            .type_from_kind(TypeKind::Function(argument_types, box return_ty))
-            .ok_or_else(|| anyhow!("Error resolving function type"))?;
+            .type_from_kind(TypeKind::Function(argument_types, box return_ty))?;
 
         let llvm_fun = self.module.add_function(
             &signature.identifier.name,
@@ -903,7 +891,7 @@ impl<'a> AoiContext<'a> {
         Ok(())
     }
 
-    fn type_from_ast(&self, ty: &ast::Type) -> Option<Type<'a>> {
+    fn type_from_ast(&self, ty: &ast::Type) -> Result<Type<'a>> {
         let kind = self.type_kind_from_ast(ty)?;
         self.type_from_kind(kind)
     }
@@ -941,18 +929,18 @@ impl<'a> AoiContext<'a> {
             .value(LlvmValueWrapper::UNIT)
     }
 
-    fn type_from_kind(&self, kind: TypeKind) -> Option<Type<'a>> {
+    fn type_from_kind(&self, kind: TypeKind) -> Result<Type<'a>> {
         use TypeKind::*;
         let context = self.context;
-        match kind {
-            Unit => Type::new(kind, context.void_type().as_any_type_enum().into()).into(),
-            Bool => Type::new(kind, context.bool_type().into()).into(),
-            F16 => Type::new(kind, context.f16_type().into()).into(),
-            F32 => Type::new(kind, context.f32_type().into()).into(),
-            F64 => Type::new(kind, context.f64_type().into()).into(),
-            F128 => Type::new(kind, context.f128_type().into()).into(),
-            Int(size) => Type::new(kind, context.custom_width_int_type(size).into()).into(),
-            UInt(size) => Type::new(kind, context.custom_width_int_type(size).into()).into(),
+        Ok(match kind {
+            Unit => Type::new(kind, context.void_type().as_any_type_enum().into()),
+            Bool => Type::new(kind, context.bool_type().into()),
+            F16 => Type::new(kind, context.f16_type().into()),
+            F32 => Type::new(kind, context.f32_type().into()),
+            F64 => Type::new(kind, context.f64_type().into()),
+            F128 => Type::new(kind, context.f128_type().into()),
+            Int(size) => Type::new(kind, context.custom_width_int_type(size).into()),
+            UInt(size) => Type::new(kind, context.custom_width_int_type(size).into()),
             Pointer(to) => Type::new(
                 Pointer(to.clone()),
                 self.type_from_kind(*to)
@@ -962,8 +950,7 @@ impl<'a> AoiContext<'a> {
                     .unwrap()
                     .ptr_type(AddressSpace::Generic)
                     .into(),
-            )
-            .into(),
+            ),
             Function(args, ret) => {
                 let kind = Function(args.clone(), ret.clone());
                 let args = args
@@ -978,64 +965,71 @@ impl<'a> AoiContext<'a> {
                     .collect::<Vec<_>>();
                 let ret = self.type_from_kind(*ret).unwrap();
 
-                Type::new(kind, ret.llvm_type.make_function(&args).unwrap().into()).into()
+                Type::new(kind, ret.llvm_type.make_function(&args).unwrap().into())
             }
             other => {
-                let index = self.types.iter().position(|f| *f == other)?;
-                Type::new(other, self.ty_values[index].clone()).into()
+                let index = self
+                    .types
+                    .iter()
+                    .position(|f| *f == other)
+                    .ok_or_else(|| anyhow!("No type {:?} found", other))?;
+                Type::new(other, self.ty_values[index].clone())
             }
-        }
+        })
     }
 
-    fn type_kind_from_ast(&self, ty: &ast::Type) -> Option<TypeKind> {
+    fn type_kind_from_ast(&self, ty: &ast::Type) -> Result<TypeKind> {
         let ast::Type {
             identifier: ast::Identifier { name },
             generics,
         } = ty;
         use TypeKind::*;
         match &**name {
-            "unit" => Some(Unit),
-            "bool" => Some(Bool),
-            "f16" => Some(F16),
-            "f32" => Some(F32),
-            "f64" => Some(F64),
-            "f128" => Some(F128),
+            "unit" => Ok(Unit),
+            "bool" => Ok(Bool),
+            "f16" => Ok(F16),
+            "f32" => Ok(F32),
+            "f64" => Ok(F64),
+            "f128" => Ok(F128),
             "Pointer" => {
-                let inner = generics.as_ref()?;
+                let inner = generics.as_ref().unwrap();
                 if inner.len() != 1 {
-                    None
+                    Err(anyhow!("Pointer must have a generic type argument"))
                 } else {
                     let inner = self.type_kind_from_ast(&inner[0])?;
-                    Some(Pointer(box inner))
+                    Ok(Pointer(box inner))
                 }
             }
-            integer if self.integer(integer).is_some() => self.integer(integer),
+            integer if self.integer(integer).is_ok() => self.integer(integer),
             other => {
                 for ty in self.types.iter() {
                     match ty {
                         TypeKind::Extern(identifier) if identifier == &other => {
-                            return Some(ty.clone())
+                            return Ok(ty.clone())
                         }
                         TypeKind::Alias(identifier, alias) if identifier == &other => {
-                            return Some(*alias.clone())
+                            return Ok(*alias.clone())
+                        }
+                        TypeKind::Struct(identifier, _) if identifier == &other => {
+                            return Ok(ty.clone());
                         }
                         _ => continue,
                     }
                 }
-                None
+                Err(anyhow!("No type {} found", other))
             }
         }
     }
 
-    fn integer(&self, name: &str) -> Option<TypeKind> {
+    fn integer(&self, name: &str) -> Result<TypeKind> {
         if name.starts_with('i') {
-            let size = name[1..].parse::<u32>().ok()?;
-            Some(TypeKind::Int(size))
+            let size = name[1..].parse::<u32>()?;
+            Ok(TypeKind::Int(size))
         } else if name.starts_with('u') {
-            let size = name[1..].parse::<u32>().ok()?;
-            Some(TypeKind::UInt(size))
+            let size = name[1..].parse::<u32>()?;
+            Ok(TypeKind::UInt(size))
         } else {
-            None
+            Err(anyhow!("No integer type {} found", name))
         }
     }
 }
@@ -1078,6 +1072,7 @@ pub enum TypeKind {
     Function(Vec<TypeKind>, Box<TypeKind>),
     Extern(ast::Identifier),
     Alias(ast::Identifier, Box<TypeKind>),
+    Struct(ast::Identifier, Vec<TypeKind>),
 }
 
 impl PartialEq for TypeKind {
@@ -1096,6 +1091,8 @@ impl PartialEq for TypeKind {
             (Slice(x), Slice(y)) => x == y,
             (Function(x, a), Function(y, b)) => a == b && x == y,
             (Extern(x), Extern(y)) => x == y,
+            (Alias(x, a), Alias(y, b)) => a == b && x == y,
+            (Struct(x, a), Struct(y, b)) => a == b && x == y,
             _ => false,
         }
     }

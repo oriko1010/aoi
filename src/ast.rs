@@ -60,6 +60,18 @@ pub enum FunctionBody {
 pub enum TypeBody {
     Extern,
     Alias(Type),
+    Struct(StructBody),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StructBody {
+    pub fields: Vec<(Identifier, Type)>,
+}
+
+impl StructBody {
+    pub fn new(fields: Vec<(Identifier, Type)>) -> Self {
+        Self { fields }
+    }
 }
 
 impl Identifier {
@@ -192,6 +204,13 @@ impl TypeDefinition {
         Self {
             identifier,
             value: TypeBody::Alias(ty),
+        }
+    }
+
+    pub fn new_struct(identifier: Identifier, structure: StructBody) -> Self {
+        Self {
+            identifier,
+            value: TypeBody::Struct(structure),
         }
     }
 }

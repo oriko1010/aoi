@@ -19,6 +19,7 @@ const FOR_KEYWORD: &str = "for";
 const EXTERN_KEYWORD: &str = "extern";
 const TRUE_KEYWORD: &str = "true";
 const FALSE_KEYWORD: &str = "false";
+const STRUCT_KEYWORD: &str = "struct";
 
 impl<'a> Parser<'a> {
     pub fn new(code: &'a str) -> Self {
@@ -234,9 +235,31 @@ impl<'a> Parser<'a> {
         if self.peek_matches(TokenType::Symbol, EXTERN_KEYWORD) {
             self.expect_symbol(EXTERN_KEYWORD)?;
             Ok(TypeDefinition::new_extern(identifier))
+        } else if self.peek_matches(TokenType::Symbol, STRUCT_KEYWORD) {
+            self.expect_symbol(STRUCT_KEYWORD)?;
+            let structure = self.parse_struct_body()?;
+            Ok(TypeDefinition::new_struct(identifier, structure))
         } else {
             let ty = self.parse_type()?;
             Ok(TypeDefinition::new_alias(identifier, ty))
+        }
+    }
+
+    fn parse_struct_body(&mut self) -> Result<StructBody> {
+        let mut fields = Vec::new();
+        self.expect(TokenType::LeftBrace, "{")?;
+        loop {
+            if self.peek_matches(TokenType::RightBrace, "}") {
+                self.expect(TokenType::RightBrace, "}")?;
+                break Ok(StructBody::new(fields));
+            } else {
+                let identifier = self.parse_identifier()?;
+                let field_type = self.parse_type()?;
+                fields.push((identifier, field_type));
+                if self.peek_matches(TokenType::Operator, ",") {
+                    self.expect(TokenType::Operator, ",")?;
+                }
+            }
         }
     }
 
@@ -272,6 +295,24 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_argument_list(&mut self) -> Result<Vec<(Identifier, Type)>> {
+        let mut arguments = Vec::new();
+        self.expect(TokenType::LeftParen, "(")?;
+        loop {
+            if self.peek_matches(TokenType::RightParen, ")") {
+                self.expect(TokenType::RightParen, ")")?;
+                break Ok(arguments);
+            } else {
+                let identifier = self.parse_identifier()?;
+                let argument_type = self.parse_type()?;
+                arguments.push((identifier, argument_type));
+                if self.peek_matches(TokenType::Operator, ",") {
+                    self.expect(TokenType::Operator, ",")?;
+                }
+            }
+        }
+    }
+
     fn parse_if(&mut self) -> Result<If> {
         self.expect_symbol(IF_KEYWORD)?;
         let condition = self.parse_expression(0)?;
@@ -302,24 +343,6 @@ impl<'a> Parser<'a> {
         self.expect_operator("=")?;
         let expression = self.parse_expression(0)?;
         Ok(Assign::new(identifier, expression))
-    }
-
-    fn parse_argument_list(&mut self) -> Result<Vec<(Identifier, Type)>> {
-        let mut arguments = Vec::new();
-        self.expect(TokenType::LeftParen, "(")?;
-        loop {
-            if self.peek_matches(TokenType::RightParen, ")") {
-                self.expect(TokenType::RightParen, ")")?;
-                break Ok(arguments);
-            } else {
-                let identifier = self.parse_identifier()?;
-                let argument_type = self.parse_type()?;
-                arguments.push((identifier, argument_type));
-                if self.peek_matches(TokenType::Operator, ",") {
-                    self.expect(TokenType::Operator, ",")?;
-                }
-            }
-        }
     }
 
     fn parse_call(&mut self, identifier: Identifier, first: Option<Expression>) -> Result<Call> {
