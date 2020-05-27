@@ -109,27 +109,28 @@ impl<'a> Codegen<'a> {
         expression: ast::Expression,
         target_type: Option<Type<'a>>,
     ) -> Result<Value<'a>> {
+        use ast::Expression::*;
         match expression {
-            ast::Expression::If(if_ast) => self.compile_if(if_ast, target_type),
-            ast::Expression::For(for_ast) => self.compile_for(for_ast, target_type),
-            ast::Expression::Assign(assign) => self.compile_assign(assign),
-            ast::Expression::TypeDefinition(ty) => self.compile_type_definition(ty),
-            ast::Expression::Function(function) => self.compile_function(function),
-            ast::Expression::Call(call) => self.compile_call(call),
-            ast::Expression::Block(block) => self.compile_block(block),
-            ast::Expression::UnaryOp(unary_op) => self.compile_unary_op(unary_op),
-            ast::Expression::BinaryOp(binary_op) => self.compile_binary_op(binary_op),
-            ast::Expression::Integer(integer) => self.compile_integer(
+            If(if_ast) => self.compile_if(if_ast, target_type),
+            For(for_ast) => self.compile_for(for_ast, target_type),
+            Assign(assign) => self.compile_assign(assign),
+            TypeDefinition(ty) => self.compile_type_definition(ty),
+            Function(function) => self.compile_function(function),
+            Call(call) => self.compile_call(call),
+            Block(block) => self.compile_block(block),
+            UnaryOp(unary_op) => self.compile_unary_op(unary_op),
+            BinaryOp(binary_op) => self.compile_binary_op(binary_op),
+            Integer(integer) => self.compile_integer(
                 integer,
                 target_type.unwrap_or_else(|| self.aoi.type_from_kind(TypeKind::Int(32)).unwrap()),
             ),
-            ast::Expression::Float(float) => self.compile_float(
+            Float(float) => self.compile_float(
                 float,
                 target_type.unwrap_or_else(|| self.aoi.type_from_kind(TypeKind::F64).unwrap()),
             ),
-            ast::Expression::Bool(boolean) => self.compile_bool(boolean),
-            ast::Expression::String(string) => self.compile_string(string),
-            ast::Expression::Identifier(identifier) => self.compile_identifier(identifier),
+            Bool(boolean) => self.compile_bool(boolean),
+            String(string) => self.compile_string(string),
+            Identifier(identifier) => self.compile_identifier(identifier),
             _ => bail!("Unknown expression: {:?}", expression),
         }
     }
@@ -150,7 +151,7 @@ impl<'a> Codegen<'a> {
                 let ty = self.aoi.type_from_kind(kind.clone())?;
 
                 self.aoi
-                    .add_type(TypeKind::Alias(def.identifier, box kind), ty.llvm_type)?;
+                    .add_type(TypeKind::Alias(def.identifier, Box::new(kind)), ty.llvm_type)?;
                 Ok(self.aoi.unit_value())
             }
             ast::TypeBody::Struct(structure) => {
@@ -750,7 +751,7 @@ impl<'a> Codegen<'a> {
 
         Ok(self
             .aoi
-            .type_from_kind(TypeKind::Pointer(box TypeKind::UInt(8)))
+            .type_from_kind(TypeKind::Pointer(Box::new(TypeKind::UInt(8))))
             .unwrap()
             .value(get.into()))
     }
@@ -794,7 +795,7 @@ impl<'a> Codegen<'a> {
 
         let fun_ty = self
             .aoi
-            .type_from_kind(TypeKind::Function(argument_types, box return_ty))?;
+            .type_from_kind(TypeKind::Function(argument_types, Box::new(return_ty)))?;
 
         let llvm_fun = self.module.add_function(
             &signature.identifier.name,
@@ -997,7 +998,7 @@ impl<'a> AoiContext<'a> {
                     Err(anyhow!("Pointer must have a generic type argument"))
                 } else {
                     let inner = self.type_kind_from_ast(&inner[0])?;
-                    Ok(Pointer(box inner))
+                    Ok(Pointer(Box::new(inner)))
                 }
             }
             integer if self.integer(integer).is_ok() => self.integer(integer),

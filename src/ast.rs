@@ -136,7 +136,7 @@ impl UnaryOp {
     pub fn new(op: &str, expression: Expression) -> Self {
         Self {
             op: op.into(),
-            expression: box expression,
+            expression: Box::new(expression),
         }
     }
 }
@@ -144,9 +144,9 @@ impl UnaryOp {
 impl BinaryOp {
     pub fn new(lhs: Expression, op: &str, rhs: Expression) -> Self {
         Self {
-            lhs: box lhs,
+            lhs: Box::new(lhs),
             op: op.into(),
-            rhs: box rhs,
+            rhs: Box::new(rhs),
         }
     }
 }
@@ -164,7 +164,7 @@ impl Function {
     pub fn new(signature: FunctionSignature, body: Expression) -> Self {
         Self {
             signature,
-            body: FunctionBody::Body(box body),
+            body: FunctionBody::Body(Box::new(body)),
         }
     }
 
@@ -225,7 +225,7 @@ impl Assign {
     pub fn new(identifier: Identifier, expression: Expression) -> Self {
         Self {
             identifier,
-            expression: box expression,
+            expression: Box::new(expression),
         }
     }
 }
@@ -242,8 +242,8 @@ impl Call {
 impl If {
     pub fn new(condition: Expression, then: Expression, other: Option<Expression>) -> Self {
         Self {
-            condition: box condition,
-            then: box then,
+            condition: Box::new(condition),
+            then: Box::new(then),
             other: other.map(Box::new),
         }
     }
@@ -257,10 +257,10 @@ impl For {
         body: Expression,
     ) -> Self {
         Self {
-            init: box init,
-            condition: box condition,
-            iteration: box iteration,
-            body: box body,
+            init: Box::new(init),
+            condition: Box::new(condition),
+            iteration: Box::new(iteration),
+            body: Box::new(body),
         }
     }
 }
